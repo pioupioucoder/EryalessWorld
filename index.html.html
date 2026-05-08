@@ -1,0 +1,4085 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lycée Jean Dumont</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; background:#000; }
+#gc { display:block; width:100%; height:calc(100vh - 70px); cursor:crosshair; }
+#hud {
+  position:fixed; bottom:0; left:0; right:0; height:70px;
+  background:#1a1814; display:flex; align-items:center;
+  justify-content:space-around; padding:0 16px; gap:12px; z-index:10;
+  border-top:1px solid #333;
+}
+#info { color:#999; font-family:Georgia,serif; font-size:11px; text-align:center; line-height:1.8; letter-spacing:0.5px; }
+#jL, #jR { cursor:pointer; touch-action:none; border-radius:8px; background:#111; }
+
+/* ── PANNEAUX FLOTTANTS ── */
+#coordPanel {
+  position:fixed; top:10px; left:10px; z-index:100;
+  background:rgba(15,12,8,0.88); border:1px solid #4a3a20;
+  border-radius:8px; padding:8px 12px; font-family:'Courier New',monospace;
+  font-size:12px; color:#d4b870; line-height:1.7;
+  backdrop-filter:blur(4px); min-width:180px;
+  display:none;
+}
+#coordPanel .coord-title {
+  font-size:10px; letter-spacing:2px; color:#8a7040;
+  text-transform:uppercase; margin-bottom:4px;
+}
+#coordPanel .coord-val { color:#f0d080; font-size:13px; font-weight:bold; }
+#copyBtn {
+  margin-top:6px; width:100%; background:#2a1e08; border:1px solid #6a5020;
+  color:#d4b060; font-size:10px; letter-spacing:1px; padding:4px 0;
+  border-radius:4px; cursor:pointer; font-family:'Courier New',monospace;
+  transition:all 0.2s;
+}
+#copyBtn:hover { background:#3a2a0a; color:#f0d080; border-color:#a07030; }
+#copyBtn.copied { background:#1a3a1a; color:#80d080; border-color:#3a8040; }
+
+/* Mini-map */
+#minimap {
+  position:fixed; top:10px; right:10px; z-index:100;
+  display:none;
+}
+#minimapCanvas {
+  border-radius:8px; border:1px solid #4a3a20;
+  display:block; background:rgba(15,12,8,0.88);
+}
+#minimapLabel {
+  text-align:center; font-size:9px; letter-spacing:1.5px;
+  color:#8a7040; font-family:'Courier New',monospace;
+  margin-top:3px; text-transform:uppercase;
+}
+
+/* Barre de boutons paramètres */
+#paramBar {
+  position:fixed; top:10px; left:50%; transform:translateX(-50%);
+  z-index:100; display:flex; gap:8px;
+}
+.pBtn {
+  background:rgba(15,12,8,0.88); border:1px solid #4a3a20;
+  border-radius:20px; padding:5px 14px; font-size:11px;
+  letter-spacing:1px; color:#a08050; cursor:pointer;
+  font-family:'Courier New',monospace; transition:all 0.2s;
+  backdrop-filter:blur(4px); white-space:nowrap; user-select:none;
+}
+.pBtn:hover { border-color:#8a6030; color:#d4b060; }
+.pBtn.active { background:rgba(40,25,5,0.95); border-color:#c09040; color:#f0d080; }
+.pBtn .icon { margin-right:5px; }
+
+/* Toast copié */
+#toast {
+  position:fixed; bottom:90px; left:50%; transform:translateX(-50%);
+  background:#1a3a1a; color:#80e080; border:1px solid #3a8040;
+  border-radius:20px; padding:6px 18px; font-size:11px;
+  font-family:'Courier New',monospace; letter-spacing:1px;
+  opacity:0; transition:opacity 0.3s; pointer-events:none; z-index:200;
+}
+</style>
+</head>
+<body>
+<canvas id="gc"></canvas>
+
+<!-- Barre de boutons paramètres -->
+<div id="paramBar">
+  <button class="pBtn" id="btnCoords" onclick="toggleCoords()"><span class="icon">📍</span>Coordonnées</button>
+  <button class="pBtn" id="btnMap" onclick="toggleMap()"><span class="icon">🗺️</span>Carte</button>
+  <button class="pBtn" id="btnFly" onclick="toggleFly()"><span class="icon">🪂</span>Vol</button>
+</div>
+
+<!-- Panneau coordonnées -->
+<div id="coordPanel">
+  <div class="coord-title">📍 Position 3D</div>
+  <div>X : <span class="coord-val" id="cx">0.00</span></div>
+  <div>Z : <span class="coord-val" id="cz">0.00</span></div>
+  <div>Y : <span class="coord-val" id="cy">1.70</span></div>
+  <button id="copyBtn" onclick="copyCoords()">⧉ COPIER</button>
+</div>
+
+<!-- Mini-carte -->
+<div id="minimap">
+  <canvas id="minimapCanvas" width="180" height="180"></canvas>
+  <div id="minimapLabel">Plan du Lycée</div>
+</div>
+
+<!-- Toast notification -->
+<div id="toast">✓ Coordonnées copiées !</div>
+
+<div id="hud">
+  <canvas id="jL" width="120" height="60"></canvas>
+  <div id="info">ZQSD · avancer &nbsp;|&nbsp; clic-glisser · regarder<br>Lycée Jean Dumont</div>
+  <canvas id="jR" width="120" height="60"></canvas>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const canvas = document.getElementById('gc');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// Ciel lumineux et chaud comme l'image de référence
+renderer.setClearColor(0x5a9fd4);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x8ab0cc, 0.004);
+
+const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 1200);
+camera.position.set(0, 1.7, 16);
+
+function resize(){
+  const w=window.innerWidth, h=window.innerHeight-70;
+  renderer.setSize(w,h);
+  camera.aspect=w/h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize',resize); resize();
+
+// Soleil doux légèrement sur le côté
+const sun = new THREE.DirectionalLight(0xfff0c0, 0.95);
+sun.position.set(15,30,20);
+sun.castShadow=true;
+sun.shadow.mapSize.width=4096; sun.shadow.mapSize.height=4096;
+sun.shadow.camera.left=-50; sun.shadow.camera.right=50;
+sun.shadow.camera.top=50; sun.shadow.camera.bottom=-50;
+sun.shadow.camera.near=1; sun.shadow.camera.far=300;
+sun.shadow.bias=-0.001;
+scene.add(sun);
+scene.add(new THREE.AmbientLight(0xc0ccd8, 0.5));
+scene.add(new THREE.HemisphereLight(0xd0e4ff,0x908060,0.3));
+
+// ─── TEXTURES ───────────────────────────────────────────────
+
+function makeTex(fn,size=128){
+  const c=document.createElement('canvas'); c.width=c.height=size;
+  const x=c.getContext('2d'); fn(x,size);
+  const t=new THREE.CanvasTexture(c);
+  t.wrapS=t.wrapT=THREE.RepeatWrapping;
+  return t;
+}
+
+// Pavés beige-gris
+const paveTex = makeTex((x,s)=>{
+  x.fillStyle='#c8b898'; x.fillRect(0,0,s,s);
+  const pw=16,ph=10;
+  for(let row=0;row*ph<s;row++){
+    const off=row%2===0?0:pw/2;
+    for(let col=-1;col*pw<s+pw;col++){
+      const bx=col*pw+off, by=row*ph;
+      const r=185+Math.random()*30, g=168+Math.random()*25, b=138+Math.random()*25;
+      x.fillStyle=`rgb(${r},${g},${b})`;
+      x.fillRect(bx+1,by+1,pw-2,ph-2);
+    }
+  }
+  x.strokeStyle='rgba(80,70,55,0.25)'; x.lineWidth=1;
+  for(let i=0;i<s;i+=pw){x.beginPath();x.moveTo(i,0);x.lineTo(i,s);x.stroke();}
+  for(let i=0;i<s;i+=ph){x.beginPath();x.moveTo(0,i);x.lineTo(s,i);x.stroke();}
+},256);
+paveTex.repeat.set(18,18);
+
+// Pierre haussmannienne (mur)
+const stoneTex = makeTex((x,s)=>{
+  x.fillStyle='#ddd4b8'; x.fillRect(0,0,s,s);
+  const bh=20,bw=40,m=2;
+  for(let row=0;row*bh<s;row++){
+    const off=row%2===0?0:bw/2;
+    for(let col=-1;col*bw<s+bw;col++){
+      const bx=col*bw+off,by=row*bh;
+      const r=210+Math.random()*25,g=200+Math.random()*22,b=172+Math.random()*22;
+      x.fillStyle=`rgb(${r},${g},${b})`;
+      x.fillRect(bx+m,by+m,bw-m,bh-m);
+      x.fillStyle=`rgba(0,0,0,${Math.random()*0.04})`;
+      x.fillRect(bx+m+2,by+m+2,Math.random()*8,Math.random()*4);
+    }
+  }
+},256);
+stoneTex.repeat.set(4,3);
+
+const roofTex = makeTex((x,s)=>{
+  x.fillStyle='#4a5060'; x.fillRect(0,0,s,s);
+  for(let i=0;i<s;i+=6){
+    x.fillStyle=`hsl(220,${12+Math.random()*8}%,${28+Math.random()*10}%)`;
+    x.fillRect(0,i,s,4);
+  }
+  x.strokeStyle='rgba(0,0,0,0.2)'; x.lineWidth=0.5;
+  for(let i=0;i<s;i+=6){x.beginPath();x.moveTo(0,i);x.lineTo(s,i);x.stroke();}
+},64);
+roofTex.repeat.set(6,2);
+
+// Sol herbe — vert vif naturel
+const grassTex = makeTex((x,s)=>{
+  x.fillStyle='#4a8c20'; x.fillRect(0,0,s,s);
+  for(let i=0;i<400;i++){
+    x.fillStyle=`hsl(${100+Math.random()*30},${55+Math.random()*25}%,${25+Math.random()*18}%)`;
+    x.fillRect(Math.random()*s,Math.random()*s,1+Math.random()*2,1+Math.random()*2);
+  }
+  // Brins d'herbe
+  for(let i=0;i<80;i++){
+    const gx=Math.random()*s, gy=Math.random()*s;
+    x.strokeStyle=`hsl(${105+Math.random()*20},60%,${30+Math.random()*15}%)`;
+    x.lineWidth=0.7;
+    x.beginPath(); x.moveTo(gx,gy+4); x.lineTo(gx+1,gy); x.stroke();
+  }
+},128);
+grassTex.repeat.set(20,20);
+
+const woodTex = makeTex((x,s)=>{
+  x.fillStyle='#5a4830'; x.fillRect(0,0,s,s);
+  for(let i=0;i<s;i+=3){
+    x.fillStyle=`hsl(28,${28+Math.random()*15}%,${20+Math.random()*12}%)`;
+    x.fillRect(0,i,s,2);
+  }
+},64);
+
+// ─── MATÉRIAUX ────────────────────────────────────────────────
+const mStone  = new THREE.MeshLambertMaterial({map:stoneTex});
+const mRoof   = new THREE.MeshLambertMaterial({map:roofTex,color:0x8898a8});
+const mPave   = new THREE.MeshLambertMaterial({map:paveTex});
+const mGrass  = new THREE.MeshLambertMaterial({map:grassTex});
+const mGlass  = new THREE.MeshLambertMaterial({color:0xd0dce8,transparent:true,opacity:0.45,side:THREE.DoubleSide});
+const mFrame  = new THREE.MeshLambertMaterial({color:0xe8e0cc});
+const mWood   = new THREE.MeshLambertMaterial({map:woodTex});
+const mMetal  = new THREE.MeshLambertMaterial({color:0x2a2a2a});
+const mMetal2 = new THREE.MeshLambertMaterial({color:0x3a3a3a});
+const mWhite  = new THREE.MeshLambertMaterial({color:0xf0ece0});
+const mSlate  = new THREE.MeshLambertMaterial({color:0x4a5060});
+// Arbustes — vert olive foncé, pas vert criard
+const mBush   = new THREE.MeshLambertMaterial({color:0x2e5510,side:THREE.DoubleSide});
+
+function add(geo,mat,x,y,z,rx=0,ry=0,rz=0,cast=true){
+  const m=new THREE.Mesh(geo,mat);
+  m.position.set(x,y,z); m.rotation.set(rx,ry,rz);
+  if(cast){m.castShadow=true;m.receiveShadow=true;}
+  scene.add(m); return m;
+}
+function box(w,h,d,mat,x,y,z,ry=0,cast=true){
+  return add(new THREE.BoxGeometry(w,h,d),mat,x,y,z,0,ry,0,cast);
+}
+
+// ─── SOL ─────────────────────────────────────────────────────
+add(new THREE.PlaneGeometry(60,60),mPave,0,0,0,-Math.PI/2,0,0,false);
+
+// ─── TERRE ÉLOIGNÉE À L'HORIZON ─────────────────────────────────────
+// Grande plaine herbeuse lointaine
+{
+  const distGround = new THREE.Mesh(
+    new THREE.PlaneGeometry(1800, 1800),
+    new THREE.MeshLambertMaterial({color:0x5a8c35})
+  );
+  distGround.rotation.x = -Math.PI/2;
+  distGround.position.set(0, -0.5, -600);
+  distGround.receiveShadow = false;
+  scene.add(distGround);
+
+  // Masse de terre principale : une longue colline basse à l'horizon
+  const landMat = new THREE.MeshLambertMaterial({color:0x4a7a28});
+  const landMat2 = new THREE.MeshLambertMaterial({color:0x3a6a20});
+  const landMat3 = new THREE.MeshLambertMaterial({color:0x6a9a40});
+
+  // Colline centrale large et basse
+  const hill1 = new THREE.Mesh(new THREE.SphereGeometry(80, 20, 10, 0, Math.PI*2, 0, Math.PI/2), landMat);
+  hill1.position.set(0, -2, -320);
+  hill1.scale.set(3.5, 0.18, 1.0);
+  scene.add(hill1);
+
+  // Colline gauche
+  const hill2 = new THREE.Mesh(new THREE.SphereGeometry(60, 16, 8, 0, Math.PI*2, 0, Math.PI/2), landMat2);
+  hill2.position.set(-180, -2, -280);
+  hill2.scale.set(2.8, 0.22, 1.0);
+  scene.add(hill2);
+
+  // Colline droite
+  const hill3 = new THREE.Mesh(new THREE.SphereGeometry(70, 16, 8, 0, Math.PI*2, 0, Math.PI/2), landMat3);
+  hill3.position.set(200, -2, -300);
+  hill3.scale.set(2.4, 0.20, 1.0);
+  scene.add(hill3);
+
+  // Petite colline lointaine (encore plus loin)
+  const hill4 = new THREE.Mesh(new THREE.SphereGeometry(90, 16, 8, 0, Math.PI*2, 0, Math.PI/2), new THREE.MeshLambertMaterial({color:0x3a6030}));
+  hill4.position.set(-80, -1, -480);
+  hill4.scale.set(4.0, 0.12, 1.2);
+  scene.add(hill4);
+
+  const hill5 = new THREE.Mesh(new THREE.SphereGeometry(70, 16, 8, 0, Math.PI*2, 0, Math.PI/2), new THREE.MeshLambertMaterial({color:0x507040}));
+  hill5.position.set(160, -1, -450);
+  hill5.scale.set(3.2, 0.15, 1.0);
+  scene.add(hill5);
+
+  // Quelques arbres lointains (simples cônes)
+  const mDistTree = new THREE.MeshLambertMaterial({color:0x1e4010});
+  const mDistTrunk = new THREE.MeshLambertMaterial({color:0x3a2010});
+  const treePositions = [
+    [-60, -290], [40,-310], [-140,-270], [120,-295],
+    [-30,-340], [80,-330], [-200,-260], [250,-280],
+    [10,-360], [-100,-350], [180,-345], [-250,-330],
+  ];
+  treePositions.forEach(([tx, tz]) => {
+    const h = 6 + Math.random()*8;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.5,h*0.4,6), mDistTrunk);
+    trunk.position.set(tx, h*0.2-1, tz);
+    scene.add(trunk);
+    const foliage = new THREE.Mesh(new THREE.ConeGeometry(2.5+Math.random()*1.5, h, 7), mDistTree);
+    foliage.position.set(tx, h*0.6, tz);
+    scene.add(foliage);
+  });
+}
+
+// ─── PELOUSES dans les quadrants (seulement ceux dans le périmètre) ─
+// Quadrant haut-gauche
+{
+  const w=20.5, d=21, cx=-13.25, cz=3.5;
+  const pl=new THREE.Mesh(new THREE.PlaneGeometry(w,d),mGrass);
+  pl.rotation.x=-Math.PI/2; pl.position.set(cx,0.015,cz); pl.receiveShadow=true; scene.add(pl);
+}
+// Quadrant haut-droit
+{
+  const w=20.5, d=21, cx=13.25, cz=3.5;
+  const pl=new THREE.Mesh(new THREE.PlaneGeometry(w,d),mGrass);
+  pl.rotation.x=-Math.PI/2; pl.position.set(cx,0.015,cz); pl.receiveShadow=true; scene.add(pl);
+}
+// Quadrant bas-gauche : X ∈ [-23.5, -3], Z ∈ [-19.5, -13]
+{
+  const w=20.5, d=6.5, cx=-13.25, cz=-16.25;
+  const pl=new THREE.Mesh(new THREE.PlaneGeometry(w,d),mGrass);
+  pl.rotation.x=-Math.PI/2; pl.position.set(cx,0.015,cz); pl.receiveShadow=true; scene.add(pl);
+}
+// Quadrant bas-droit : X ∈ [3, 23.5], Z ∈ [-19.5, -13]
+{
+  const w=20.5, d=6.5, cx=13.25, cz=-16.25;
+  const pl=new THREE.Mesh(new THREE.PlaneGeometry(w,d),mGrass);
+  pl.rotation.x=-Math.PI/2; pl.position.set(cx,0.015,cz); pl.receiveShadow=true; scene.add(pl);
+}
+
+// ═══════════════════════════════════════════════════════
+// ─── CONSTANTES BÂTIMENT (pour les portes/détails) ────
+// ═══════════════════════════════════════════════════════
+const BX=0, BZ=-24, BW=54, BD=7;
+const BH = 13.5;
+
+// Matériaux fenêtre (gardés pour les portes)
+const mWinFrame = new THREE.MeshLambertMaterial({color:0xf8f4ec});
+const mWinGlass = new THREE.MeshLambertMaterial({color:0xb8cce0, transparent:true, opacity:0.55});
+const mWinSill  = new THREE.MeshLambertMaterial({color:0xf0ece0});
+const mWinShutter = new THREE.MeshLambertMaterial({color:0x4a6240});
+
+// ── PORTE PRINCIPALE SUPPRIMÉE ─
+const gpZ = -19.5;
+const mainDoorLeaves = [];
+
+// ─── HORLOGE RÉELLE au-dessus de la porte principale ─────────
+const clockCanvas = document.createElement('canvas');
+clockCanvas.width = 256; clockCanvas.height = 256;
+const clockCtx = clockCanvas.getContext('2d');
+const clockTex = new THREE.CanvasTexture(clockCanvas);
+
+function drawClock(){
+  const ctx = clockCtx;
+  const w = 256, h = 256, cx = w/2, cy = h/2, r = 110;
+  ctx.clearRect(0,0,w,h);
+
+  // Fond blanc cassé
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+  ctx.fillStyle='#f5f0e0'; ctx.fill();
+  // Bordure dorée
+  ctx.lineWidth=10; ctx.strokeStyle='#8a6a20'; ctx.stroke();
+  // Cercle intérieur
+  ctx.beginPath(); ctx.arc(cx,cy,r-8,0,Math.PI*2);
+  ctx.lineWidth=2; ctx.strokeStyle='#c8a840'; ctx.stroke();
+
+  // Chiffres romains
+  const romans = ['XII','I','II','III','IV','V','VI','VII','VIII','IX','X','XI'];
+  ctx.fillStyle='#2a1a08'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.font='bold 16px Georgia,serif';
+  romans.forEach((num,i)=>{
+    const ang = (i/12)*Math.PI*2 - Math.PI/2;
+    const rx = cx + Math.cos(ang)*(r-26);
+    const ry = cy + Math.sin(ang)*(r-26);
+    ctx.fillText(num, rx, ry);
+  });
+
+  // Graduations
+  for(let i=0;i<60;i++){
+    const ang = (i/60)*Math.PI*2 - Math.PI/2;
+    const isMaj = i%5===0;
+    const r1 = r - (isMaj?18:12);
+    const r2 = r - 8;
+    ctx.beginPath();
+    ctx.moveTo(cx+Math.cos(ang)*r1, cy+Math.sin(ang)*r1);
+    ctx.lineTo(cx+Math.cos(ang)*r2, cy+Math.sin(ang)*r2);
+    ctx.strokeStyle='#2a1a08'; ctx.lineWidth=isMaj?3:1; ctx.stroke();
+  }
+
+  // Heure réelle
+  const now = new Date();
+  const s = now.getSeconds() + now.getMilliseconds()/1000;
+  const m = now.getMinutes() + s/60;
+  const hh = (now.getHours()%12) + m/60;
+
+  // Aiguille heures
+  const ha = (hh/12)*Math.PI*2 - Math.PI/2;
+  ctx.beginPath();
+  ctx.moveTo(cx - Math.cos(ha)*12, cy - Math.sin(ha)*12);
+  ctx.lineTo(cx + Math.cos(ha)*58, cy + Math.sin(ha)*58);
+  ctx.strokeStyle='#1a1008'; ctx.lineWidth=6; ctx.lineCap='round'; ctx.stroke();
+
+  // Aiguille minutes
+  const ma = (m/60)*Math.PI*2 - Math.PI/2;
+  ctx.beginPath();
+  ctx.moveTo(cx - Math.cos(ma)*14, cy - Math.sin(ma)*14);
+  ctx.lineTo(cx + Math.cos(ma)*82, cy + Math.sin(ma)*82);
+  ctx.strokeStyle='#1a1008'; ctx.lineWidth=4; ctx.lineCap='round'; ctx.stroke();
+
+  // Aiguille secondes
+  const sa = (s/60)*Math.PI*2 - Math.PI/2;
+  ctx.beginPath();
+  ctx.moveTo(cx - Math.cos(sa)*18, cy - Math.sin(sa)*18);
+  ctx.lineTo(cx + Math.cos(sa)*90, cy + Math.sin(sa)*90);
+  ctx.strokeStyle='#c02020'; ctx.lineWidth=2; ctx.lineCap='round'; ctx.stroke();
+
+  // Centre
+  ctx.beginPath(); ctx.arc(cx,cy,6,0,Math.PI*2);
+  ctx.fillStyle='#c02020'; ctx.fill();
+
+  clockTex.needsUpdate = true;
+}
+
+// (horloge supprimée avec la porte principale)
+// ─── CONSTANTE BÂTIMENTS LATÉRAUX ──────────
+const SLATH = 13.5, SLATW = 7, SLATD = 48, SLATX = 27.5;
+
+
+// ─── PORTAIL D'ENTRÉE ────────────────────────────────────────
+box(1.8,7,1.8,mStone,-8,3.5,18);
+box(1.8,7,1.8,mStone,8,3.5,18);
+// Linteau droit au-dessus du portail (pas de demi-cercle)
+box(16.4,0.6,1.8,mStone,0,6.7,18);
+box(16.8,0.35,2.0,mStone,0,7.05,18);
+// ─── PORTAIL DE FER ANIMÉ (2 vantaux, cadenas doré) ─────────────
+// Charnières aux piliers : pivot gauche à X=-7.1, pivot droit à X=+7.1
+// Chaque vantail s'étend VERS LE CENTRE (barres dans la direction du pivot vers X=0)
+// Ouverture : vantaux pivotent vers l'intérieur de la cour (Z négatif)
+const gateLeftPivot  = new THREE.Group(); gateLeftPivot.position.set(-7.1, 0, 18); scene.add(gateLeftPivot);
+const gateRightPivot = new THREE.Group(); gateRightPivot.position.set( 7.1, 0, 18); scene.add(gateRightPivot);
+
+// Fer foncé avec léger reflet métallique
+const mGateBar  = new THREE.MeshLambertMaterial({color:0x3a3f44});
+const mGateTip  = new THREE.MeshLambertMaterial({color:0x4a5058});
+const mGold     = new THREE.MeshLambertMaterial({color:0xd4a010});
+const mGoldDark = new THREE.MeshLambertMaterial({color:0xa07808});
+
+// side=+1 : vantail gauche (pivot X=-7.1), barres vers la droite (vers le centre)
+// side=-1 : vantail droit  (pivot X=+7.1), barres vers la gauche (vers le centre)
+function addGateBars(pivot, side){
+  // 8 barreaux verticaux, offset depuis le pivot vers le centre
+  // Pivot gauche à X=-7.1, dernier barreau à -7.1 + 7.0 = -0.1 → rejoint le centre
+  const barOffsets = [0.5, 1.4, 2.3, 3.2, 4.1, 5.0, 5.9, 6.85];
+  barOffsets.forEach(dx=>{
+    const bx = side * dx;
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.09,5.5,0.09), mGateBar);
+    bar.position.set(bx,2.75,0); bar.castShadow=true; pivot.add(bar);
+    // Pointe de lance
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.07,0.35,4), mGateTip);
+    tip.rotation.y = Math.PI/4;
+    tip.position.set(bx,5.68,0); pivot.add(tip);
+    // Boule déco sous la pointe
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.055,6,5), mGateTip);
+    ball.position.set(bx,5.36,0); pivot.add(ball);
+  });
+  // Barres horizontales (longueur = 7.1 du pivot jusqu'au centre)
+  [5.1, 2.9, 0.9].forEach(hy=>{
+    const halfW = 7.1;
+    const hb = new THREE.Mesh(new THREE.BoxGeometry(halfW,0.13,0.10), mGateBar);
+    hb.position.set(side * halfW/2, hy, 0); pivot.add(hb);
+  });
+}
+// Vantail gauche : charnière à X=-7.1, barres vers la droite → side=+1
+addGateBars(gateLeftPivot,  +1);
+// Vantail droit  : charnière à X=+7.1, barres vers la gauche → side=-1
+addGateBars(gateRightPivot, -1);
+
+// ── CADENAS DORÉ ─────────────────────────────────────────────────
+const padlockGroup = new THREE.Group();
+padlockGroup.position.set(0, 2.0, 18.02);
+scene.add(padlockGroup);
+const plBody = new THREE.Mesh(new THREE.BoxGeometry(0.28,0.24,0.12), mGold);
+plBody.position.set(0,0,0); padlockGroup.add(plBody);
+const plTop = new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.08,0.12,12), mGold);
+plTop.rotation.x = Math.PI/2; plTop.position.set(0,0.12,0); padlockGroup.add(plTop);
+const plArc = new THREE.Mesh(new THREE.TorusGeometry(0.065,0.022,8,12,Math.PI), mGoldDark);
+plArc.rotation.x = Math.PI/2; plArc.position.set(0,0.26,0); padlockGroup.add(plArc);
+const plHole = new THREE.Mesh(new THREE.CircleGeometry(0.04,8), new THREE.MeshLambertMaterial({color:0x0a0a0a}));
+plHole.position.set(0,0,0.065); padlockGroup.add(plHole);
+const plSlot = new THREE.Mesh(new THREE.BoxGeometry(0.018,0.055,0.01), new THREE.MeshLambertMaterial({color:0x0a0a0a}));
+plSlot.position.set(0,-0.05,0.065); padlockGroup.add(plSlot);
+
+// État du portail
+let gateAngle = 0;
+let gateTargetAngle = 0;
+let gateOpen = false;
+function updatePadlock(){ padlockGroup.visible = !gateOpen; }
+updatePadlock();
+// ══════════════════════════════════════════════════════════════
+// ─── JARDINIER RÉALISTE (3× plus grand, membres animés) ──────
+// Caméra à y=1.7 → jardinier ~3.2u pour paraître grand/adulte
+// ══════════════════════════════════════════════════════════════
+const S = 1.85; // facteur d'échelle : environ 1.85× les valeurs de base
+
+const mSkin   = new THREE.MeshLambertMaterial({color:0xd4956a});
+const mSkin2  = new THREE.MeshLambertMaterial({color:0xc88050});
+const mHair   = new THREE.MeshLambertMaterial({color:0x3a2010});
+const mShirt  = new THREE.MeshLambertMaterial({color:0x4a7a30});
+const mPants  = new THREE.MeshLambertMaterial({color:0x3a3050});
+const mBoots  = new THREE.MeshLambertMaterial({color:0x1a1008});
+const mHatM   = new THREE.MeshLambertMaterial({color:0x9a7220});
+const mHatBrimM = new THREE.MeshLambertMaterial({color:0xb08a30});
+const mBelt   = new THREE.MeshLambertMaterial({color:0x2a1a08});
+const mOutil  = new THREE.MeshLambertMaterial({color:0x7a5c30});
+const mMetalTool = new THREE.MeshLambertMaterial({color:0x666666});
+const mKeyCol = new THREE.MeshLambertMaterial({color:0xc8a020});
+
+// Racine principale du jardinier (position globale dans la scène)
+const gardener = new THREE.Group();
+gardener.position.set(10.5, 0, 15.5);
+scene.add(gardener);
+
+// Fonction utilitaire : ajoute un mesh à un groupe
+function mb(group, w,h,d,mat,x,y,z){
+  const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+  m.position.set(x,y,z); m.castShadow=true; group.add(m); return m;
+}
+function mc(group, rt,rb,h,seg,mat,x,y,z,rx=0,rz=0){
+  const m=new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,seg),mat);
+  m.position.set(x,y,z); m.rotation.x=rx; m.rotation.z=rz; m.castShadow=true; group.add(m); return m;
+}
+function ms(group,r,mat,x,y,z){
+  const m=new THREE.Mesh(new THREE.SphereGeometry(r,10,8),mat);
+  m.position.set(x,y,z); m.castShadow=true; group.add(m); return m;
+}
+
+// ── TORSE (ancrage principal, bas du torse à y=0.7*S) ──
+const torsoGroup = new THREE.Group();
+torsoGroup.position.set(0, 0.72*S, 0);
+gardener.add(torsoGroup);
+
+// Corps principal
+mb(torsoGroup, 0.52*S,0.62*S,0.30*S, mShirt, 0,0,0);
+// Ceinture
+mb(torsoGroup, 0.54*S,0.07*S,0.32*S, mBelt, 0,-0.28*S,0);
+// Bretelles
+mb(torsoGroup, 0.06*S,0.55*S,0.06*S, mBelt, -0.14*S, 0.05*S, 0.14*S);
+mb(torsoGroup, 0.06*S,0.55*S,0.06*S, mBelt,  0.14*S, 0.05*S, 0.14*S);
+
+// ── COU ──
+const neckGroup = new THREE.Group();
+neckGroup.position.set(0, 0.33*S, 0);
+torsoGroup.add(neckGroup);
+mc(neckGroup, 0.09*S,0.10*S,0.18*S,8, mSkin, 0,0,0);
+
+// ── TÊTE (pivote sur le cou) ──
+const headGroup = new THREE.Group();
+headGroup.position.set(0, 0.12*S, 0);
+neckGroup.add(headGroup);
+
+// Crâne arrondi
+ms(headGroup, 0.19*S, mSkin, 0, 0.03*S, 0);
+// Visage légèrement allongé
+mb(headGroup, 0.32*S,0.36*S,0.30*S, mSkin, 0, 0.01*S, 0);
+// Mâchoire (légèrement plus large)
+mb(headGroup, 0.30*S,0.12*S,0.28*S, mSkin2, 0,-0.14*S,0.01*S);
+// Bouche
+mb(headGroup, 0.10*S,0.025*S,0.04*S, new THREE.MeshLambertMaterial({color:0x7a3010}), 0,-0.16*S,0.15*S);
+// Lèvres
+mb(headGroup, 0.12*S,0.03*S,0.04*S, new THREE.MeshLambertMaterial({color:0xc06040}), 0,-0.12*S,0.155*S);
+// Nez
+ms(headGroup, 0.035*S, mSkin2, 0, -0.04*S, 0.155*S);
+// Yeux (blancs + pupilles)
+[-1,1].forEach(side=>{
+  mb(headGroup, 0.075*S,0.06*S,0.04*S, new THREE.MeshLambertMaterial({color:0xffffff}), side*0.085*S, 0.04*S, 0.155*S);
+  mb(headGroup, 0.040*S,0.040*S,0.04*S, new THREE.MeshLambertMaterial({color:0x1a1010}), side*0.085*S, 0.04*S, 0.160*S);
+});
+// Sourcils
+[-1,1].forEach(side=>{
+  mb(headGroup, 0.08*S,0.018*S,0.04*S, new THREE.MeshLambertMaterial({color:0x3a2010}), side*0.085*S, 0.095*S, 0.158*S);
+});
+// Oreilles
+[-1,1].forEach(side=>{
+  ms(headGroup, 0.05*S, mSkin2, side*0.175*S, 0.01*S, 0);
+});
+// Cheveux
+mb(headGroup, 0.34*S,0.10*S,0.32*S, mHair, 0, 0.19*S, -0.02*S);
+mb(headGroup, 0.34*S,0.24*S,0.08*S, mHair, 0, 0.08*S, -0.16*S); // arrière tête
+// Moustache
+mb(headGroup, 0.14*S,0.025*S,0.04*S, new THREE.MeshLambertMaterial({color:0x3a2010}), 0,-0.07*S,0.158*S);
+// Chapeau de paille
+mc(headGroup, 0.38*S,0.38*S,0.04*S,16, mHatBrimM, 0, 0.27*S, 0); // bord large
+mc(headGroup, 0.18*S,0.21*S,0.22*S,12, mHatM, 0, 0.37*S, 0);     // calotte
+mb(headGroup, 0.04*S,0.06*S,0.38*S, new THREE.MeshLambertMaterial({color:0xc84020}), 0, 0.29*S, 0); // ruban rouge
+
+// ── BRAS GAUCHE (pivot à l'épaule) ──
+const armLGroup = new THREE.Group();
+armLGroup.position.set(-0.30*S, 0.26*S, 0);
+torsoGroup.add(armLGroup);
+mb(armLGroup, 0.15*S,0.42*S,0.17*S, mShirt,  0,-0.20*S,0); // haut bras
+mb(armLGroup, 0.13*S,0.36*S,0.14*S, mSkin,   0,-0.57*S,0); // avant-bras
+ms(armLGroup, 0.075*S, mSkin, 0,-0.40*S,0); // coude
+// Main gauche
+const handLGroup = new THREE.Group();
+handLGroup.position.set(0,-0.76*S,0);
+armLGroup.add(handLGroup);
+mb(handLGroup, 0.13*S,0.15*S,0.10*S, mSkin, 0,0,0);
+// Doigts
+for(let f=0;f<4;f++) mb(handLGroup, 0.025*S,0.075*S,0.025*S, mSkin, (-0.045+f*0.03)*S,-0.09*S,0.02*S);
+
+// ── BRAS DROIT (pivot à l'épaule) ──
+const armRGroup = new THREE.Group();
+armRGroup.position.set( 0.30*S, 0.26*S, 0);
+torsoGroup.add(armRGroup);
+mb(armRGroup, 0.15*S,0.42*S,0.17*S, mShirt,  0,-0.20*S,0);
+mb(armRGroup, 0.13*S,0.36*S,0.14*S, mSkin,   0,-0.57*S,0);
+ms(armRGroup, 0.075*S, mSkin, 0,-0.40*S,0);
+const handRGroup = new THREE.Group();
+handRGroup.position.set(0,-0.76*S,0);
+armRGroup.add(handRGroup);
+mb(handRGroup, 0.13*S,0.15*S,0.10*S, mSkin, 0,0,0);
+for(let f=0;f<4;f++) mb(handRGroup, 0.025*S,0.075*S,0.025*S, mSkin, (-0.045+f*0.03)*S,-0.09*S,0.02*S);
+
+// ── BASSIN ──
+const hipGroup = new THREE.Group();
+hipGroup.position.set(0,-0.32*S,0);
+torsoGroup.add(hipGroup);
+mb(hipGroup, 0.50*S,0.20*S,0.28*S, mPants, 0,0,0);
+
+// ── JAMBE GAUCHE (pivot à la hanche) ──
+const legLGroup = new THREE.Group();
+legLGroup.position.set(-0.14*S,-0.08*S,0);
+hipGroup.add(legLGroup);
+mb(legLGroup, 0.20*S,0.52*S,0.22*S, mPants, 0,-0.24*S,0);
+mb(legLGroup, 0.18*S,0.46*S,0.20*S, mPants, 0,-0.68*S,0);
+ms(legLGroup, 0.11*S, mPants, 0,-0.50*S,0); // genou
+// Botte gauche
+mb(legLGroup, 0.22*S,0.16*S,0.32*S, mBoots, 0,-0.98*S, 0.04*S);
+mb(legLGroup, 0.20*S,0.06*S,0.10*S, mBoots, 0,-1.04*S, 0.16*S); // pointe
+
+// ── JAMBE DROITE ──
+const legRGroup = new THREE.Group();
+legRGroup.position.set( 0.14*S,-0.08*S,0);
+hipGroup.add(legRGroup);
+mb(legRGroup, 0.20*S,0.52*S,0.22*S, mPants, 0,-0.24*S,0);
+mb(legRGroup, 0.18*S,0.46*S,0.20*S, mPants, 0,-0.68*S,0);
+ms(legRGroup, 0.11*S, mPants, 0,-0.50*S,0);
+mb(legRGroup, 0.22*S,0.16*S,0.32*S, mBoots, 0,-0.98*S, 0.04*S);
+mb(legRGroup, 0.20*S,0.06*S,0.10*S, mBoots, 0,-1.04*S, 0.16*S);
+
+// ── OUTIL : râteau (dans la main droite) ──
+const toolGroup = new THREE.Group();
+toolGroup.position.set(0.30*S, -0.05*S, 0); // attaché au torse côté droit
+gardener.add(toolGroup);
+// Manche
+mc(toolGroup, 0.025*S,0.025*S,2.0*S,6, mOutil, 0, 0.10*S, 0.20*S, 0.3, 0.15);
+// Tête râteau
+mb(toolGroup, 0.40*S,0.04*S,0.04*S, mMetalTool, 0.18*S, 0.76*S, 0.50*S);
+for(let d=0;d<6;d++) mb(toolGroup, 0.02*S,0.10*S,0.02*S, mMetalTool, (-0.10+d*0.04)*S, 0.71*S, 0.50*S);
+
+// ── CLÉ (accrochée à la ceinture) ──
+const keyGroup = new THREE.Group();
+keyGroup.position.set(-0.28*S, -0.28*S, 0.16*S);
+torsoGroup.add(keyGroup);
+mc(keyGroup, 0.04*S,0.04*S,0.16*S,8, mKeyCol, 0,0,0,0,Math.PI/2); // tige clé
+ms(keyGroup, 0.055*S, mKeyCol, -0.10*S,0,0); // anneau
+mc(keyGroup, 0.055*S,0.055*S,0.015*S,8, new THREE.MeshLambertMaterial({color:0xa08010,wireframe:true}), -0.10*S,0,0,Math.PI/2,0);
+mb(keyGroup, 0.015*S,0.04*S,0.015*S, mKeyCol, 0.06*S,-0.025*S,0);
+mb(keyGroup, 0.015*S,0.03*S,0.015*S, mKeyCol, 0.04*S,-0.040*S,0);
+
+// ── ARROSOIR (posé au sol près du jardinier) ──
+const canGroup = new THREE.Group();
+canGroup.position.set(11.5, 0, 14.5);
+scene.add(canGroup);
+const mCan = new THREE.MeshLambertMaterial({color:0x2a6a80});
+mb(canGroup, 0.30,0.22,0.18, mCan, 0,0.11,0);
+mc(canGroup, 0.04,0.04,0.30,8, mCan, -0.15,0.20,0, 0,0.4);  // bec
+mc(canGroup, 0.035,0.035,0.30,8, mCan, 0,0.28,0,0,0);         // anse
+mc(canGroup, 0.055,0.055,0.025,8, mCan, -0.43,0.20,0,Math.PI/2,0); // tête arrosoir
+
+// ─── LOGIQUE JARDINIER ─────────────────────────────────────────
+let gardenerWalkT = 0;
+let gardenerState = 'idle';
+let gardenerActivityTimer = 0;
+let gardenerActivity = 'raking';
+let gardenerGateAction = false; // true = doit ouvrir le portail
+let gardenerCloseAction = false; // true = doit fermer le portail
+let gardenerOpTimer = 0;
+
+
+const GARDENER_POST   = new THREE.Vector3(10.5, 0, 15.5);
+const GARDENER_GATE   = new THREE.Vector3(1.5,  0, 17.5);
+const GARDENER_RAKE1  = new THREE.Vector3(6.0,  0, 10.0);
+const GARDENER_WATER1 = new THREE.Vector3(5.5,  0, 8.0);
+
+// ─── MUR frontal GAUCHE — de X=-8 (pilier portail) à X=-24 (face bâtiment latéral), hauteur 7
+// Centre à X = (-8 + -24)/2 = -16, largeur = 24-8 = 16
+box(16, 7, 0.4, mStone, -16, 3.5, 18);
+// Mur frontal DROIT — symétrique
+box(16, 7, 0.4, mStone, 16, 3.5, 18);
+
+// ─── MURS PÉRIMÈTRE LATÉRAUX (avec trous pour les portes ET les fenêtres) ────
+// Fenêtres latérales : fw=2.4(en Z), fh=2.4, fcy=2.6 → fBot=1.4, fTop=3.8
+// Mur gauche X=-24 :
+//   Segment LONG  : Z=18 à Z=-8.25  (long=26.25)  → 4 fenêtres à Z=12, 6, 0, -5
+//   Segment COURT : Z=-11.75 à Z=-19.5 (long=7.75) → 1 fenêtre  à Z=-15.6
+{
+  const X=-24, D=0.4, mS=mStone;
+  const fw=1.8, fh=2.4, fcy=2.6, fBot=fcy-fh/2, fTop=fcy+fh/2, wallH=5;
+
+  // === CÔTÉ LONG : Z=18 → -8.25 ===
+  const longWins = [12, 5.5, -1, -6];
+  const longZmin=-8.25, longZmax=18;
+  // Bandes horizontales (sous et au-dessus des fenêtres)
+  box(D, fBot,      longZmax-longZmin, mS, X, fBot/2,              (longZmin+longZmax)/2);
+  box(D, wallH-fTop,longZmax-longZmin, mS, X, fTop+(wallH-fTop)/2, (longZmin+longZmax)/2);
+  // Segments verticaux entre fenêtres
+  const longCuts = [];
+  let prev = longZmin;
+  [...longWins].sort((a,b)=>a-b).forEach(wz=>{
+    longCuts.push([prev, wz-fw/2]);
+    prev = wz+fw/2;
+  });
+  longCuts.push([prev, longZmax]);
+  longCuts.forEach(([z1,z2])=>{ const l=z2-z1; if(l>0.01) box(D,fh,l,mS,X,fcy,(z1+z2)/2); });
+
+  // === CÔTÉ COURT : Z=-11.75 → -19.5 ===
+  const shortWin = -15.6;
+  const shortZmin=-19.5, shortZmax=-11.75;
+  box(D, fBot,      shortZmax-shortZmin, mS, X, fBot/2,              (shortZmin+shortZmax)/2);
+  box(D, wallH-fTop,shortZmax-shortZmin, mS, X, fTop+(wallH-fTop)/2, (shortZmin+shortZmax)/2);
+  const shortCuts = [[shortZmin, shortWin-fw/2],[shortWin+fw/2, shortZmax]];
+  shortCuts.forEach(([z1,z2])=>{ const l=z2-z1; if(l>0.01) box(D,fh,l,mS,X,fcy,(z1+z2)/2); });
+
+  // Bandeau au-dessus du trou de porte — SUPPRIMÉ
+  // box(D, 2, 3.5, mS, X, 6, -10);
+}
+
+// Mur droit X=+24, symétrique
+{
+  const X=24, D=0.4, mS=mStone;
+  const fw=1.8, fh=2.4, fcy=2.6, fBot=fcy-fh/2, fTop=fcy+fh/2, wallH=5;
+
+  const longWins = [12, 5.5, -1, -6];
+  const longZmin=-8.25, longZmax=18;
+  box(D, fBot,      longZmax-longZmin, mS, X, fBot/2,              (longZmin+longZmax)/2);
+  box(D, wallH-fTop,longZmax-longZmin, mS, X, fTop+(wallH-fTop)/2, (longZmin+longZmax)/2);
+  const longCuts = [];
+  let prev = longZmin;
+  [...longWins].sort((a,b)=>a-b).forEach(wz=>{
+    longCuts.push([prev, wz-fw/2]);
+    prev = wz+fw/2;
+  });
+  longCuts.push([prev, longZmax]);
+  longCuts.forEach(([z1,z2])=>{ const l=z2-z1; if(l>0.01) box(D,fh,l,mS,X,fcy,(z1+z2)/2); });
+
+  const shortWin = -15.6;
+  const shortZmin=-19.5, shortZmax=-11.75;
+  box(D, fBot,      shortZmax-shortZmin, mS, X, fBot/2,              (shortZmin+shortZmax)/2);
+  box(D, wallH-fTop,shortZmax-shortZmin, mS, X, fTop+(wallH-fTop)/2, (shortZmin+shortZmax)/2);
+  const shortCuts = [[shortZmin, shortWin-fw/2],[shortWin+fw/2, shortZmax]];
+  shortCuts.forEach(([z1,z2])=>{ const l=z2-z1; if(l>0.01) box(D,fh,l,mS,X,fcy,(z1+z2)/2); });
+
+  // Bandeau au-dessus du trou de porte droit — SUPPRIMÉ
+  // box(D, 2, 3.5, mS, X, 6, -10);
+}
+
+// ─── FENÊTRES SUR MURS LATÉRAUX (verre dans plan XZ, axe Z) ──
+function makeWindowZ(wx, wy, wz, side) {
+  // side = -1 (mur gauche X=-24) ou +1 (mur droit X=+24)
+  const fw=1.8, fh=2.4;
+  const mFrameW = new THREE.MeshLambertMaterial({color:0x4a4a4a});
+  const mGlassW = new THREE.MeshLambertMaterial({color:0xb8d4e8, transparent:true, opacity:0.38, side:THREE.DoubleSide});
+  const mMullion = new THREE.MeshLambertMaterial({color:0x4a4a4a});
+  const mBorder  = new THREE.MeshLambertMaterial({color:0x2e2e2e}); // gris très foncé bordure externe
+  const ox = side*0.08; // léger décalage vers l'intérieur de la cour
+
+  // ── BORDURE EXTERNE gris foncé ──
+  const bThick=0.12, bExtra=0.32, bDepth=0.18;
+  const box2 = side; // direction X d'extrusion
+  // Haut
+  box(bDepth, bThick, fw+bExtra, mBorder, wx+ox+box2*0.05, wy+fh/2+0.22, wz);
+  // Bas
+  box(bDepth, bThick, fw+bExtra, mBorder, wx+ox+box2*0.05, wy-fh/2-0.22, wz);
+  // Gauche (en Z)
+  box(bDepth, fh+bExtra, bThick, mBorder, wx+ox+box2*0.05, wy, wz-fw/2-0.22);
+  // Droite (en Z)
+  box(bDepth, fh+bExtra, bThick, mBorder, wx+ox+box2*0.05, wy, wz+fw/2+0.22);
+
+  // Encadrement
+  box(0.14, 0.14, fw+0.28, mFrameW, wx+ox, wy+fh/2+0.07, wz);
+  box(0.20, 0.16, fw+0.36, mFrameW, wx+ox, wy-fh/2-0.08, wz);
+  box(0.14, fh+0.14, 0.13, mFrameW, wx+ox, wy, wz-fw/2-0.065);
+  box(0.14, fh+0.14, 0.13, mFrameW, wx+ox, wy, wz+fw/2+0.065);
+  box(0.22, 0.10, fw+0.46, mFrameW, wx+ox, wy+fh/2+0.20, wz);
+
+  // Carreaux 2 colonnes × 3 rangées
+  const cw=(fw-0.14)/2, ch=(fh-0.18)/3;
+  for(let col=0;col<2;col++){
+    for(let row=0;row<3;row++){
+      const gz = wz - fw/2 + 0.07 + cw*col + cw/2 + col*0.04;
+      const gy = wy - fh/2 + 0.09 + ch*row + ch/2 + row*0.04;
+      const pane = new THREE.Mesh(new THREE.PlaneGeometry(cw-0.05, ch-0.05), mGlassW);
+      pane.position.set(wx+ox, gy, gz);
+      pane.rotation.y = Math.PI/2;
+      pane.castShadow=false; scene.add(pane);
+    }
+  }
+  // Croisillons
+  box(0.07, fh-0.04, 0.05, mMullion, wx+ox, wy, wz);
+  for(let i=1;i<3;i++){
+    const ty = wy - fh/2 + 0.09 + ch*i + (i-0.5)*0.04;
+    box(0.07, 0.05, fw-0.05, mMullion, wx+ox, ty, wz);
+  }
+}
+
+// Mur gauche — côté long (4 fenêtres)
+makeWindowZ(-24, 2.6,  12,   1);
+makeWindowZ(-24, 2.6,  5.5,  1);
+makeWindowZ(-24, 2.6, -1,    1);
+makeWindowZ(-24, 2.6, -6,    1);
+// Mur gauche — côté court (1 fenêtre)
+makeWindowZ(-24, 2.6, -15.6, 1);
+
+// Mur droit — côté long (4 fenêtres)
+makeWindowZ( 24, 2.6,  12,  -1);
+makeWindowZ( 24, 2.6,  5.5, -1);
+makeWindowZ( 24, 2.6, -1,   -1);
+makeWindowZ( 24, 2.6, -6,   -1);
+// Mur droit — côté court (1 fenêtre)
+makeWindowZ( 24, 2.6, -15.6,-1);
+
+// ─── MUR DU FOND avec trous pour fenêtres ────────────────────
+// 3 fenêtres de chaque côté, éloignées de la porte principale
+// Positions X : gauche -10, -14, -18.5 | droite +10, +14, +18.5
+{
+  const Z=-19.5, D=0.4, mS=mStone;
+  const winXs = [-10, -14, -18.5];
+  const fw=1.6, fh=2.4, fcy=2.6, fBot=fcy-fh/2, fTop=fcy+fh/2;
+  const wallXmin=-24.75, wallXmax=-3.0, wallH=5;
+  box(wallXmax-wallXmin, fBot, D, mS, (wallXmin+wallXmax)/2, fBot/2, Z);
+  box(wallXmax-wallXmin, wallH-fTop, D, mS, (wallXmin+wallXmax)/2, fTop+(wallH-fTop)/2, Z);
+  const cuts = [
+    [wallXmin,          winXs[2]-fw/2],
+    [winXs[2]+fw/2,     winXs[1]-fw/2],
+    [winXs[1]+fw/2,     winXs[0]-fw/2],
+    [winXs[0]+fw/2,     wallXmax     ],
+  ];
+  cuts.forEach(([x1,x2])=>{ const w=x2-x1; if(w>0.01) box(w,fh,D,mS,(x1+x2)/2,fcy,Z); });
+}
+{
+  const Z=-19.5, D=0.4, mS=mStone;
+  const winXs = [10, 14, 18.5];
+  const fw=1.6, fh=2.4, fcy=2.6, fBot=fcy-fh/2, fTop=fcy+fh/2;
+  const wallXmin=3.0, wallXmax=24.75, wallH=5;
+  box(wallXmax-wallXmin, fBot, D, mS, (wallXmin+wallXmax)/2, fBot/2, Z);
+  box(wallXmax-wallXmin, wallH-fTop, D, mS, (wallXmin+wallXmax)/2, fTop+(wallH-fTop)/2, Z);
+  const cuts = [
+    [wallXmin,          winXs[0]-fw/2],
+    [winXs[0]+fw/2,     winXs[1]-fw/2],
+    [winXs[1]+fw/2,     winXs[2]-fw/2],
+    [winXs[2]+fw/2,     wallXmax     ],
+  ];
+  cuts.forEach(([x1,x2])=>{ const w=x2-x1; if(w>0.01) box(w,fh,D,mS,(x1+x2)/2,fcy,Z); });
+}
+
+// ─── GRANDE PORTE CENTRALE (Z=-19.5, X=0) ─────────────────────
+// Intégrée dans le mur de façade : même plan, même épaisseur
+// Ouverture : X=-2.7 à +2.7, hauteur 4.2. Mur au-dessus et sur les côtés bouché.
+{
+  const Z = -19.5, D = 0.4;
+  const doorW = 5.4, doorH = 4.2;
+  const wallH = 5;
+  const mS = mStone;
+  const mDoor = new THREE.MeshLambertMaterial({color:0x3a2810}); // bois foncé
+  const mGold2 = new THREE.MeshLambertMaterial({color:0xc8980c}); // doré sobre
+
+  // Mur au-dessus de la porte (même matériau que le reste de la façade)
+  box(doorW, wallH - doorH, D, mS, 0, doorH + (wallH - doorH)/2, Z);
+
+  // Piliers pierre intégrés au mur (légèrement saillants) de chaque côté
+  [-doorW/2 - 0.3, doorW/2 + 0.3].forEach(px=>{
+    box(0.6, wallH, D + 0.12, mS, px, wallH/2, Z);
+  });
+
+  // Linteau pierre au-dessus des vantaux, dans le mur
+  box(doorW + 0.1, 0.3, D + 0.12, mS, 0, doorH + 0.15, Z);
+
+  // Vantaux : 2 grands panneaux bois, pivotent vers l'intérieur
+  const mainLeaves = [];
+  [-1, 1].forEach(side=>{
+    const pivot = new THREE.Group();
+    pivot.position.set(side * (doorW/2 - 0.08), 0, Z + 0.05);
+    scene.add(pivot);
+    mainLeaves.push({pivot, side});
+    const lo = -side * (doorW/4 - 0.04);
+
+    // Panneau principal
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(doorW/2 - 0.16, doorH - 0.08, 0.10), mDoor);
+    leaf.position.set(lo, (doorH - 0.08)/2, 0);
+    leaf.castShadow = true; pivot.add(leaf);
+
+    // Cadre extérieur (baguette dorée)
+    const bw = doorW/2 - 0.16, bh = doorH - 0.08;
+    [[bw, 0.07, 0, bh/2], [bw, 0.07, 0, -bh/2],
+     [0.07, bh, -bw/2, 0], [0.07, bh, bw/2, 0]].forEach(([fw,fh,fx,fy])=>{
+      const b = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, 0.05), mGold2);
+      b.position.set(lo + fx, fy, 0.055); pivot.add(b);
+    });
+
+    // Panneau haut (séparé par une baguette horizontale)
+    const sepY = doorH * 0.65;
+    const ph = new THREE.Mesh(new THREE.BoxGeometry(bw - 0.18, 0.05, 0.05), mGold2);
+    ph.position.set(lo, sepY, 0.055); pivot.add(ph);
+
+    // Poignée dorée
+    const hnd = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.24, 10), mGold2);
+    hnd.rotation.z = Math.PI/2;
+    hnd.position.set(lo * 2 * 0.85, doorH * 0.44, 0.12); pivot.add(hnd);
+  });
+
+  window._mainPorteData = { leaves: mainLeaves };
+}
+// ──────────────────────────────────────────────────────────────
+
+// ─── FENÊTRES STYLE HAUSSMANNIEN (3 rangées × 2 colonnes) ─────
+function makeWindow(wx, wy, wz) {
+  const fw = 1.6, fh = 2.4;
+  const mFrameW = new THREE.MeshLambertMaterial({color:0x4a4a4a});
+  const mGlassW = new THREE.MeshLambertMaterial({color:0xb8d4e8, transparent:true, opacity:0.38, side:THREE.DoubleSide});
+  const mMullion = new THREE.MeshLambertMaterial({color:0x4a4a4a});
+  const mBorder  = new THREE.MeshLambertMaterial({color:0x2e2e2e}); // gris très foncé bordure externe
+
+  // ── BORDURE EXTERNE gris foncé (plan XY, mur Z=-19.5) ──
+  const bThick=0.12, bExtra=0.32, bDepth=0.18;
+  // Haut
+  box(fw+bExtra, bThick, bDepth, mBorder, wx, wy+fh/2+0.22, wz+0.05);
+  // Bas
+  box(fw+bExtra, bThick, bDepth, mBorder, wx, wy-fh/2-0.22, wz+0.05);
+  // Gauche
+  box(bThick, fh+bExtra, bDepth, mBorder, wx-fw/2-0.22, wy, wz+0.05);
+  // Droite
+  box(bThick, fh+bExtra, bDepth, mBorder, wx+fw/2+0.22, wy, wz+0.05);
+
+  box(fw+0.28, 0.14, 0.14, mFrameW, wx, wy+fh/2+0.07, wz+0.07);
+  box(fw+0.36, 0.16, 0.20, mFrameW, wx, wy-fh/2-0.08, wz+0.10);
+  box(0.13, fh+0.14, 0.14, mFrameW, wx-fw/2-0.065, wy, wz+0.07);
+  box(0.13, fh+0.14, 0.14, mFrameW, wx+fw/2+0.065, wy, wz+0.07);
+  box(fw+0.46, 0.10, 0.22, mFrameW, wx, wy+fh/2+0.20, wz+0.11);
+  const cw = (fw - 0.14) / 2;
+  const ch = (fh - 0.18) / 3;
+  for(let col=0; col<2; col++){
+    for(let row=0; row<3; row++){
+      const gx = wx - fw/2 + 0.07 + cw*col + cw/2 + col*0.04;
+      const gy = wy - fh/2 + 0.09 + ch*row + ch/2 + row*0.04;
+      const pane = new THREE.Mesh(new THREE.PlaneGeometry(cw-0.05, ch-0.05), mGlassW);
+      pane.position.set(gx, gy, wz+0.06);
+      pane.castShadow=false; scene.add(pane);
+    }
+  }
+  box(0.05, fh-0.04, 0.07, mMullion, wx, wy, wz+0.07);
+  for(let i=1; i<3; i++){
+    const ty = wy - fh/2 + 0.09 + ch*i + (i-0.5)*0.04;
+    box(fw-0.05, 0.05, 0.07, mMullion, wx, ty, wz+0.07);
+  }
+}
+
+// 3 fenêtres à gauche de la porte principale (éloignées)
+makeWindow(-10,  2.6, -19.5);
+makeWindow(-14,  2.6, -19.5);
+makeWindow(-18.5, 2.6, -19.5);
+// 3 fenêtres à droite de la porte principale (éloignées)
+makeWindow( 10,  2.6, -19.5);
+makeWindow( 14,  2.6, -19.5);
+makeWindow( 18.5, 2.6, -19.5);
+
+
+
+
+// ─── ARBRES (feuillage automnal beige/brun-vert, pas vert vif) ─
+function makeTree(x,z,h=6,spread=3.5){
+  const trunkM=new THREE.MeshLambertMaterial({color:0x5c4020});
+  // Couleurs feuillage: tons rosés/beige doux comme l'image de référence (cerisier en fleurs, printemps)
+  const lc=[0x4a7020, 0x3d6818, 0x567828, 0x486020, 0x5a7830];
+  const leafColor=lc[Math.floor(Math.random()*lc.length)];
+  const leafM=new THREE.MeshLambertMaterial({color:leafColor,transparent:true,opacity:0.95});
+  const tg=new THREE.CylinderGeometry(0.12,0.22,h,7);
+  const tm=new THREE.Mesh(tg,trunkM); tm.position.set(x,h/2,z); tm.castShadow=true; scene.add(tm);
+  for(let b=0;b<3;b++){
+    const angle=b*Math.PI*2/3;
+    const bg2=new THREE.CylinderGeometry(0.05,0.1,1.5,5);
+    const bm=new THREE.Mesh(bg2,trunkM);
+    bm.position.set(x+Math.cos(angle)*0.6,h*0.7,z+Math.sin(angle)*0.6);
+    bm.rotation.z=Math.cos(angle)*0.4; bm.rotation.x=Math.sin(angle)*0.4;
+    bm.castShadow=true; scene.add(bm);
+  }
+  const blobs=[
+    [0,0,spread*0.9,spread*0.6,spread*0.9],
+    [spread*0.5,spread*0.15,spread*0.75,spread*0.5,spread*0.75],
+    [-spread*0.5,spread*0.1,spread*0.75,spread*0.5,spread*0.75],
+    [spread*0.25,-spread*0.15,spread*0.65,spread*0.45,spread*0.65],
+    [-spread*0.3,-spread*0.1,spread*0.6,spread*0.4,spread*0.6],
+  ];
+  blobs.forEach(([ox,oz,rx,ry,rz])=>{
+    const lg=new THREE.SphereGeometry(1,8,6);
+    const lm=new THREE.Mesh(lg,leafM);
+    lm.scale.set(rx,ry*0.7,rz);
+    lm.position.set(x+ox, h+ry*0.3, z+oz);
+    lm.castShadow=true; scene.add(lm);
+  });
+}
+
+// Arbres le long du chemin central (allée portail → porte principale, axe X=0)
+// Chemin central: Z de +17 à -21, largeur 5.5 → bordure à X≈±3.5
+// Arbres le long du chemin central — seulement ceux dans le périmètre (Z entre -19.5 et 18)
+[-1, 1].forEach(side=>{
+  const tx = side * 5.5;
+  [-2, -7, -13, 5, 10].forEach(tz=>{
+    makeTree(tx, tz, 6.5, 3.5);
+  });
+});
+
+// Arbres le long du bras gauche
+[-1, 1].forEach(side=>{
+  const tz = -10 + side * 5.5;
+  [-5, -11, -17].forEach(tx=>{
+    makeTree(tx, tz, 6, 3.2);
+  });
+});
+
+// Arbres le long du bras droit
+[-1, 1].forEach(side=>{
+  const tz = -10 + side * 5.5;
+  [5, 11, 17].forEach(tx=>{
+    makeTree(tx, tz, 6, 3.2);
+  });
+});
+
+// ─── ARBUSTES (seulement dans le périmètre) ─────────────────────────
+function bush(x,z,w=1.5,h=1.2,d=1.2){
+  const g=new THREE.SphereGeometry(1,7,5);
+  const m=new THREE.Mesh(g,mBush); m.scale.set(w,h,d);
+  m.position.set(x,h*0.5,z); m.castShadow=true; scene.add(m);
+}
+[-12,12].forEach(x=>{ bush(x,10,1.2,1,1.2); bush(x,13,1.2,1,1.2); });
+// Buissons quadrants bas
+[-20,-16,-12,  12,16,20].forEach(x=>{ bush(x,-15,1.3,1,1.3); bush(x,-18,1.3,1,1.3); });
+
+// ─── BANCS (corrigés: assise + dossier bien orientés) ────────
+function bench(x,z,ry=0){
+  const woodBM=new THREE.MeshLambertMaterial({color:0xc8a050});
+  const ironM=new THREE.MeshLambertMaterial({color:0x222233});
+
+  // Groupe pour faciliter la rotation
+  const group=new THREE.Group();
+  group.position.set(x,0,z);
+  group.rotation.y=ry;
+  scene.add(group);
+
+  function gbox(w,h,d,mat,px,py,pz){
+    const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
+    mesh.position.set(px,py,pz);
+    mesh.castShadow=true; mesh.receiveShadow=true;
+    group.add(mesh);
+  }
+
+  // Assise (planches horizontales, plus larges)
+  gbox(2.2, 0.08, 0.5, woodBM, 0, 0.44, 0);
+  gbox(2.2, 0.08, 0.5, woodBM, 0, 0.36, 0);
+
+  // Dossier
+  const backMesh = new THREE.Mesh(new THREE.BoxGeometry(2.2,0.5,0.08), woodBM);
+  backMesh.position.set(0, 0.75, -0.28);
+  backMesh.rotation.x = -0.18;
+  backMesh.castShadow=true;
+  group.add(backMesh);
+
+  // Pieds (4 en métal — bien sous l'assise)
+  [-0.85, 0.85].forEach(dx=>{
+    [-0.2, 0.2].forEach(dz=>{
+      gbox(0.07, 0.45, 0.07, ironM, dx, 0.22, dz);
+    });
+  });
+}
+
+// Bancs sur le bord des pelouses, face au chemin central (axe X=0)
+// Quadrant haut-gauche : bord droit de la pelouse, éloigné du tableau
+bench(-4.5, 8, Math.PI/2);
+// Quadrant haut-droit : bord gauche de la pelouse
+bench(4.5, 8, -Math.PI/2);
+// Bancs face au bras horizontal (axe Z=-10), dossier vers la pelouse (Z+), face vers Z-
+bench(-13, -6.5, Math.PI);
+bench(13, -6.5, Math.PI);
+
+// ─── LAMPADAIRES ─────────────────────────────────────────────
+function lamp(x,z){
+  const ironM2=new THREE.MeshLambertMaterial({color:0x1a1a1a});
+  const bulbM=new THREE.MeshBasicMaterial({color:0xffe8a0});
+  const p=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.07,5,8),ironM2);
+  p.position.set(x,2.5,z); p.castShadow=true; scene.add(p);
+  const arm=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,1.2,6),ironM2);
+  arm.position.set(x+0.55,5.1,z); arm.rotation.z=Math.PI/6; scene.add(arm);
+  const lg=new THREE.SphereGeometry(0.18,8,6);
+  const lm=new THREE.Mesh(lg,bulbM); lm.position.set(x+0.9,5,z); scene.add(lm);
+  const cap=new THREE.Mesh(new THREE.ConeGeometry(0.22,0.25,6),ironM2);
+  cap.position.set(x+0.9,5.28,z); scene.add(cap);
+}
+lamp(-16,-2); lamp(16,-2); lamp(-16,-18); lamp(16,-18);
+
+// ─── TABLEAU D'AFFICHAGE (panneau vitré avec feuilles collées) ─
+// Données des classes
+const classData = [
+  {
+    title: "Classe de 5e A",
+    students: ["Bernard Chloé","Petit Thomas","Lambert Sarah","Moreau Lucas","Rivière Emma"]
+  },
+  {
+    title: "Classe de 5e B",
+    students: ["Bellamy Clem","Durand Léa","Fournier Nathan","Gauthier Zoé","Lefèvre Manon","Dubois Hugo","Rousseau Clara","Leroy Inès"]
+  },
+  {
+    title: "Classe de 5e C",
+    students: ["Girard Camille","Vincent Maxime","Rolland Sarah","Simon Paul","Michel Lucie"]
+  },
+  {
+    title: "Classe de 5e D",
+    students: ["Darsen Lucy","Blanchard Julia","Marchand Enzo","Chevalier Morgane","Colin Axelle"]
+  }
+];
+
+function makeClassTexture(classInfo){
+  const cw=256, ch=320;
+  const c=document.createElement('canvas'); c.width=cw; c.height=ch;
+  const x=c.getContext('2d');
+  x.fillStyle='#faf8f2'; x.fillRect(0,0,cw,ch);
+  const grad=x.createLinearGradient(0,0,cw,ch);
+  grad.addColorStop(0,'rgba(255,255,255,0)');
+  grad.addColorStop(1,'rgba(180,160,120,0.08)');
+  x.fillStyle=grad; x.fillRect(0,0,cw,ch);
+  x.strokeStyle='rgba(100,90,70,0.25)'; x.lineWidth=2; x.strokeRect(1,1,cw-2,ch-2);
+  x.fillStyle='#2a3a2a'; x.fillRect(0,0,cw,38);
+  x.font='bold 18px Georgia, serif'; x.fillStyle='#f5f0e0'; x.textAlign='center';
+  x.fillText(classInfo.title, cw/2, 25);
+  x.font='13px Georgia, serif'; x.fillStyle='#2a2820'; x.textAlign='left';
+  classInfo.students.forEach((student, i)=>{
+    const yPos = 60 + i * 30;
+    x.fillStyle='#5a7040'; x.beginPath(); x.arc(22, yPos-4, 3, 0, Math.PI*2); x.fill();
+    x.fillStyle='#2a2820'; x.fillText(student, 34, yPos);
+    if(i < classInfo.students.length-1){
+      x.strokeStyle='rgba(180,160,120,0.3)'; x.lineWidth=0.5;
+      x.beginPath(); x.moveTo(14, yPos+12); x.lineTo(cw-14, yPos+12); x.stroke();
+    }
+  });
+  return new THREE.CanvasTexture(c);
+}
+
+// Tableau collé contre le mur droit (X≈23.5), face vers l'intérieur (vers X-)
+// Quand on entre par le portail (Z=18), on marche vers Z- et on voit le tableau sur sa droite
+// Le tableau est perpendiculaire au mur droit, face côté cour (face vers X-)
+// Tableau bien avancé vers le portail, pas collé au mur (X=18 au lieu de 23)
+const TAB_X = 4.0, TAB_Z = 3.0, TAB_Y_BASE = 0;
+const boardDepth = 0.25;
+const boardW = 4.2, boardH = 2.6;
+
+// Poteau de support — tableau orienté face vers le portail (vers Z+)
+const mPillar = new THREE.MeshLambertMaterial({color:0x2a2a35});
+const poleGeo = new THREE.CylinderGeometry(0.06,0.08,3.2,8);
+const poleMesh = new THREE.Mesh(poleGeo, mPillar);
+poleMesh.position.set(TAB_X, 1.6, TAB_Z+boardW/2+0.1);
+scene.add(poleMesh);
+// Deuxième pied
+const poleMesh2 = new THREE.Mesh(poleGeo, mPillar);
+poleMesh2.position.set(TAB_X, 1.6, TAB_Z-boardW/2-0.1);
+scene.add(poleMesh2);
+
+// Corps du tableau: largeur le long de Z, profondeur le long de X
+// box(w,h,d, ...) — ici on veut largeur=boardW en Z, profondeur=boardDepth en X
+const boardMat = new THREE.MeshLambertMaterial({color:0x282c28});
+const boardGeo = new THREE.BoxGeometry(boardDepth, boardH, boardW);
+const boardMesh = new THREE.Mesh(boardGeo, boardMat);
+boardMesh.position.set(TAB_X, TAB_Y_BASE+boardH/2+0.4, TAB_Z);
+boardMesh.castShadow=true; boardMesh.receiveShadow=true;
+scene.add(boardMesh);
+
+// Cadre métal
+const frameMat = mMetal2;
+// Haut et bas
+[TAB_Y_BASE+0.4, TAB_Y_BASE+boardH+0.4].forEach(fy=>{
+  const f=new THREE.Mesh(new THREE.BoxGeometry(boardDepth+0.05,0.1,boardW+0.2),frameMat);
+  f.position.set(TAB_X,fy,TAB_Z); scene.add(f);
+});
+// Côtés gauche/droit (en Z)
+[TAB_Z-boardW/2, TAB_Z+boardW/2].forEach(fz=>{
+  const f=new THREE.Mesh(new THREE.BoxGeometry(boardDepth+0.05,boardH,0.1),frameMat);
+  f.position.set(TAB_X,TAB_Y_BASE+boardH/2+0.4,fz); scene.add(f);
+});
+
+// Auvent (toit du tableau), avance vers X- (côté cour)
+const roofBoard=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.15,boardW+0.4),frameMat);
+roofBoard.position.set(TAB_X-0.3, TAB_Y_BASE+boardH+0.5, TAB_Z);
+scene.add(roofBoard);
+
+// Feuilles de classe collées sur la face intérieure du tableau (face vers X-)
+// Les feuilles sont des PlaneGeometry dans le plan YZ, face vers X- (rotation.y = -Math.PI/2)
+const sheetOffsets = [-1.45, -0.45, 0.45, 1.45]; // décalage en Z
+classData.forEach((cls, i)=>{
+  const tex = makeClassTexture(cls);
+  const sheetMat = new THREE.MeshBasicMaterial({map:tex, side:THREE.DoubleSide});
+  const sheetGeo = new THREE.PlaneGeometry(0.88, 1.1);
+  const sheet = new THREE.Mesh(sheetGeo, sheetMat);
+  sheet.position.set(
+    TAB_X - boardDepth/2 - 0.02,  // légèrement devant la face du tableau
+    TAB_Y_BASE + boardH/2 + 0.38,
+    TAB_Z + sheetOffsets[i]
+  );
+  // Face vers X- (visible depuis l'intérieur de la cour)
+  sheet.rotation.y = -Math.PI/2;
+  scene.add(sheet);
+});
+
+// ═══════════════════════════════════════════════════════
+// ─── CHEMIN EN CROIX SYMÉTRIQUE (portail → 3 portes) ──
+// ═══════════════════════════════════════════════════════
+const mDalle = new THREE.MeshLambertMaterial({
+  color: 0xd4c8a8,
+  map: (()=>{
+    const tex = makeTex((x,s)=>{
+      x.fillStyle='#cec0a0'; x.fillRect(0,0,s,s);
+      // Grandes dalles rectangulaires
+      for(let row=0;row<4;row++){
+        const off = row%2===0?0:s/8;
+        for(let col=0;col<5;col++){
+          const bx=col*(s/4)+off, by=row*(s/4);
+          const v=200+Math.random()*25;
+          x.fillStyle=`rgb(${v},${Math.round(v*0.92)},${Math.round(v*0.76)})`;
+          x.fillRect(bx+2,by+2,s/4-3,s/4-3);
+        }
+      }
+      x.strokeStyle='rgba(100,85,60,0.35)'; x.lineWidth=2;
+      for(let i=0;i<=s;i+=s/4){
+        x.beginPath();x.moveTo(i,0);x.lineTo(i,s);x.stroke();
+        x.beginPath();x.moveTo(0,i);x.lineTo(s,i);x.stroke();
+      }
+    },256);
+    tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
+    tex.repeat.set(3,12);
+    return tex;
+  })()
+});
+const mDalleBord = new THREE.MeshLambertMaterial({color:0xa89878});
+
+// Allée centrale: portail (Z=17) → porte principale (Z≈-21)
+// Centre Z = (17 + -21)/2 = -2, longueur = 38
+{
+  const pl = new THREE.Mesh(new THREE.PlaneGeometry(5.5, 38), mDalle);
+  pl.rotation.x=-Math.PI/2; pl.position.set(0, 0.025, -2); pl.receiveShadow=true; scene.add(pl);
+  // Bordures
+  [-2.9, 2.9].forEach(bx=>{
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 38.4), mDalleBord);
+    b.position.set(bx, 0.05, -2); scene.add(b);
+  });
+}
+
+// Bras gauche: croisement (X=0,Z=-10) → porte latérale gauche (X=-24, Z=-10)
+// Centre X = (0+-24)/2 = -12, longueur = 24
+{
+  const pl = new THREE.Mesh(new THREE.PlaneGeometry(24, 5.5), mDalle);
+  pl.rotation.x=-Math.PI/2; pl.position.set(-12, 0.025, -10); pl.receiveShadow=true; scene.add(pl);
+  [-2.9, 2.9].forEach(bz=>{
+    const b = new THREE.Mesh(new THREE.BoxGeometry(24.4, 0.1, 0.2), mDalleBord);
+    b.position.set(-12, 0.05, -10+bz); scene.add(b);
+  });
+}
+
+// Bras droit: croisement (X=0,Z=-10) → porte latérale droite (X=+24, Z=-10)
+{
+  const pl = new THREE.Mesh(new THREE.PlaneGeometry(24, 5.5), mDalle);
+  pl.rotation.x=-Math.PI/2; pl.position.set(12, 0.025, -10); pl.receiveShadow=true; scene.add(pl);
+  [-2.9, 2.9].forEach(bz=>{
+    const b = new THREE.Mesh(new THREE.BoxGeometry(24.4, 0.1, 0.2), mDalleBord);
+    b.position.set(12, 0.05, -10+bz); scene.add(b);
+  });
+}
+
+// Petits carrés de jonction aux intersections (couvre le chemin)
+{
+  const junc = new THREE.Mesh(new THREE.PlaneGeometry(5.5, 5.5), mDalle);
+  junc.rotation.x=-Math.PI/2; junc.position.set(0, 0.03, -10); junc.receiveShadow=true; scene.add(junc);
+}
+
+
+
+// ═══════════════════════════════════════════════════════
+
+
+// Feuilles au sol
+const leafGround=new THREE.MeshLambertMaterial({color:0xa09050,transparent:true,opacity:0.3});
+for(let i=0;i<30;i++){
+  const lg2=new THREE.PlaneGeometry(0.3+Math.random()*0.4,0.2+Math.random()*0.3);
+  const lm2=new THREE.Mesh(lg2,leafGround);
+  lm2.rotation.x=-Math.PI/2; lm2.rotation.z=Math.random()*Math.PI;
+  lm2.position.set((Math.random()-0.5)*30,0.01,(Math.random()-0.5)*20-5);
+  scene.add(lm2);
+}
+
+// ─── FLEURS SUR LA PELOUSE ────────────────────────────────────
+// Les fleurs sont dans les zones d'herbe (entre les chemins, hors allées)
+// Zones: quadrants entre les bras du chemin en croix
+function makeFlower(x, z) {
+  const colors = [0xff6688, 0xffcc33, 0xff9944, 0xffffff, 0xff4488, 0xffee55];
+  const color = colors[Math.floor(Math.random() * colors.length)];
+  const stemM = new THREE.MeshLambertMaterial({color:0x3a7020});
+  const petalM = new THREE.MeshLambertMaterial({color, side:THREE.DoubleSide});
+  const centerM = new THREE.MeshLambertMaterial({color:0xffe060});
+  // Tige
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,0.3,4), stemM);
+  stem.position.set(x, 0.15, z); scene.add(stem);
+  // Pétales (4 petits disques autour du centre)
+  for(let p=0;p<4;p++){
+    const ang = p * Math.PI/2 + Math.random()*0.3;
+    const petal = new THREE.Mesh(new THREE.CircleGeometry(0.1, 5), petalM);
+    petal.rotation.x = -Math.PI/2 + 0.3;
+    petal.rotation.z = ang;
+    petal.position.set(x + Math.cos(ang)*0.08, 0.32, z + Math.sin(ang)*0.08);
+    scene.add(petal);
+  }
+  // Centre jaune
+  const center = new THREE.Mesh(new THREE.CircleGeometry(0.07, 6), centerM);
+  center.rotation.x = -Math.PI/2; center.position.set(x, 0.33, z); scene.add(center);
+}
+
+const flowerZones = [
+  {minX:-22, maxX:-6, minZ:-4, maxZ:12},
+  {minX:6, maxX:22, minZ:-4, maxZ:12},
+  {minX:-22, maxX:-6, minZ:-19, maxZ:-14},
+  {minX:6, maxX:22, minZ:-19, maxZ:-14},
+];
+for(let i=0;i<50;i++){
+  const zone = flowerZones[Math.floor(Math.random()*flowerZones.length)];
+  const fx = zone.minX + Math.random()*(zone.maxX - zone.minX);
+  const fz = zone.minZ + Math.random()*(zone.maxZ - zone.minZ);
+  makeFlower(fx, fz);
+}
+
+// ─── CIEL (lumineux, chaud, comme l'image de référence) ───────
+// Gradient sky: bleu pâle en haut, blanc laiteux chaud en bas
+const skyCanvas=document.createElement('canvas');
+skyCanvas.width=1; skyCanvas.height=256;
+const skyCtx=skyCanvas.getContext('2d');
+const skyGrad=skyCtx.createLinearGradient(0,0,0,256);
+skyGrad.addColorStop(0,'#3a7fc1');    // bleu vif profond en haut
+skyGrad.addColorStop(0.35,'#5a9fd4'); // bleu ciel vif
+skyGrad.addColorStop(0.7,'#a8ccec'); // bleu pâle
+skyGrad.addColorStop(1,'#dceef8');   // blanc laiteux à l'horizon
+skyCtx.fillStyle=skyGrad;
+skyCtx.fillRect(0,0,1,256);
+const skyTex=new THREE.CanvasTexture(skyCanvas);
+const skyMat=new THREE.MeshBasicMaterial({map:skyTex,side:THREE.BackSide});
+const skySphere=new THREE.Mesh(new THREE.SphereGeometry(150,16,12),skyMat);
+scene.add(skySphere);
+
+// Nuages blancs bien définis, bouffants
+function cloud(x,y,z,scale=1){
+  const m=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0.95});
+  const mShadow=new THREE.MeshBasicMaterial({color:0xe0e8f0,transparent:true,opacity:0.7});
+  [[0,0,0,4,1.4,3,'m'],[3.2,0.5,0,3,1.5,2.4,'m'],[-3,0.4,0,2.8,1.2,2.2,'m'],
+   [1,-0.4,0,2.2,1,1.8,'s'],[-1.5,-0.3,0,2,0.9,1.6,'s'],[0,0.8,0,2.5,1,2,'m']].forEach(([dx,dy,dz,w,h,d,shade])=>{
+    const c=new THREE.Mesh(new THREE.SphereGeometry(1,7,5),shade==='s'?mShadow:m);
+    c.scale.set(w*scale,h*scale,d*scale); c.position.set(x+dx*scale,y+dy*scale,z+dz*scale); scene.add(c);
+  });
+}
+cloud(-40,30,-65,1.5); cloud(25,35,-72,1.3); cloud(55,28,-58,1.2);
+cloud(-20,33,-85,1.0); cloud(65,30,-42,1.4); cloud(-65,28,-48,1.1);
+cloud(-35,38,-52,1.7); cloud(40,32,-68,1.1); cloud(10,36,-90,1.0);
+
+// ─── SYSTÈME PORTES INTERACTIVES ────────────────────────────────
+
+// Matériau surbrillance (outline lumineux)
+const mGlow = new THREE.MeshBasicMaterial({color:0xffe080, transparent:true, opacity:0.18, side:THREE.FrontSide});
+
+// ─── PORTES LATÉRALES INTERACTIVES (X=±24, Z=-10) ────────────
+function makeSideDoor(faceX, outDir){
+  const doorZ = -10, doorW = 3.0, doorH = 4.2;
+  const mStoneLight = new THREE.MeshLambertMaterial({color:0xe0d8c0});
+  const mDarkPanel  = new THREE.MeshLambertMaterial({color:0x3a2010});
+
+  // Piliers de chaque côté
+  [-doorW/2-0.15, doorW/2+0.15].forEach(dz=>{
+    box(0.5, doorH+0.4, 0.45, mStoneLight, faceX+outDir*0.08, (doorH+0.4)/2, doorZ+dz);
+  });
+  // Linteau
+  box(0.4, 0.4, doorW+0.8, mStoneLight, faceX+outDir*0.08, doorH+0.2, doorZ);
+
+  // Vantaux sur pivots
+  const leaves = [];
+  const leafW = doorW/2 - 0.08;
+  [-1, 1].forEach(lr=>{
+    const pivot = new THREE.Group();
+    pivot.position.set(faceX+outDir*0.3, 0, doorZ + lr*(doorW/2-0.05));
+    scene.add(pivot);
+    leaves.push({pivot, lr});
+    const localZ = -lr*(leafW/2);
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.14, doorH-0.1, leafW), mWood);
+    leaf.position.set(0, (doorH-0.1)/2, localZ); leaf.castShadow=true; pivot.add(leaf);
+    [0.75, 0.42, 0.14].forEach((yr, pi)=>{
+      const ph=[1.0,1.1,0.75][pi];
+      const p=new THREE.Mesh(new THREE.BoxGeometry(0.07,ph,leafW-0.2),mDarkPanel);
+      p.position.set(outDir*0.04, doorH*yr, localZ); pivot.add(p);
+    });
+    const gl=new THREE.Mesh(new THREE.BoxGeometry(0.06,0.65,leafW-0.25),mWinGlass);
+    gl.position.set(outDir*0.04, doorH-0.5, localZ); pivot.add(gl);
+    // Poignée côté cour (face outDir)
+    const hndS=new THREE.Mesh(new THREE.CylinderGeometry(0.032,0.032,0.22,8),new THREE.MeshLambertMaterial({color:0xc8a030}));
+    hndS.rotation.x=Math.PI/2; hndS.position.set(outDir*0.12, doorH*0.5, localZ*2*0.9); pivot.add(hndS);
+  });
+  return { leaves, pos: new THREE.Vector3(faceX+outDir*0.2, 1.7, doorZ), outDir };
+}
+const sdL = makeSideDoor(-24, 1);
+const sdR = makeSideDoor( 24,-1);
+
+// ─── PORTE DU FOND (grande, Z=-27, parallèle à la porte principale) ────────
+
+// Texture nom sur vantail de porte
+function makeDoorLabelTex(label) {
+  const cw = 256, ch = 512;
+  const cv = document.createElement('canvas');
+  cv.width = cw; cv.height = ch;
+  const ctx = cv.getContext('2d');
+  // Fond bois
+  ctx.fillStyle = '#6a4820'; ctx.fillRect(0, 0, cw, ch);
+  for(let i = 0; i < ch; i += 4) {
+    ctx.fillStyle = `rgba(${80+Math.random()*30},${50+Math.random()*20},${20+Math.random()*15},0.18)`;
+    ctx.fillRect(0, i, cw, 2);
+  }
+  // Plaquette laiton centrale
+  const px = 20, py = ch*0.28, pw = cw-40, ph = ch*0.22;
+  ctx.fillStyle = '#c8a020'; ctx.fillRect(px-3, py-3, pw+6, ph+6);
+  const g = ctx.createLinearGradient(px, py, px+pw, py+ph);
+  g.addColorStop(0, '#e8c840'); g.addColorStop(0.5, '#d4aa28'); g.addColorStop(1, '#b08820');
+  ctx.fillStyle = g; ctx.fillRect(px, py, pw, ph);
+  ctx.strokeStyle = '#7a5810'; ctx.lineWidth = 3;
+  ctx.strokeRect(px+4, py+4, pw-8, ph-8);
+  // Texte
+  ctx.fillStyle = '#1a0e04'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  // Gestion multiline (séparation par \n)
+  const lines = label.split('\n');
+  const fontSize = label.length > 12 ? 26 : 32;
+  ctx.font = `bold ${fontSize}px Georgia, serif`;
+  const lineH = fontSize * 1.3;
+  lines.forEach((line, i) => {
+    const ty = py + ph/2 + (i - (lines.length-1)/2) * lineH;
+    ctx.fillText(line, cw/2, ty);
+  });
+  return new THREE.CanvasTexture(cv);
+}
+
+function makeBackDoor(){
+  const doorW = 4.4, doorH = 4.6;
+  const mStoneLight = new THREE.MeshLambertMaterial({color:0xe0d8c0});
+
+  // Piliers de chaque côté
+  [-doorW/2-0.2, doorW/2+0.2].forEach(dx=>{
+    box(0.55, doorH+0.5, 0.5, mStoneLight, dx, (doorH+0.5)/2, -27+0.15);
+    // Chapiteau
+    box(0.75, 0.22, 0.7, new THREE.MeshLambertMaterial({color:0xd4ccb8}), dx, doorH+0.5, -27+0.15);
+  });
+  // Linteau
+  box(doorW+1.2, 0.45, 0.5, mStoneLight, 0, doorH+0.22, -27+0.15);
+
+  // 2 vantaux animés
+  const leaves = [];
+  [-1, 1].forEach((side, idx)=>{
+    const pivot = new THREE.Group();
+    pivot.position.set(side*(doorW/2-0.05), 0, -27+0.1);
+    scene.add(pivot);
+    leaves.push({pivot, side});
+    const lo = -side*(doorW/4);
+
+    // Vantail idx==1 (side=+1) → label Bureau du Principal visible depuis la cour (Z+)
+    const leafMat = idx === 1
+      ? new THREE.MeshLambertMaterial({map: makeDoorLabelTex('Bureau du\nPrincipal')})
+      : mWood;
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(doorW/2-0.1, doorH-0.1, 0.1), leafMat);
+    leaf.position.set(lo, (doorH-0.1)/2, 0); leaf.castShadow=true; pivot.add(leaf);
+    // Panneaux décoratifs
+    const p1 = new THREE.Mesh(new THREE.BoxGeometry(doorW/2-0.4, 1.5, 0.07), new THREE.MeshLambertMaterial({color:0x4a3018}));
+    p1.position.set(lo, doorH*0.75, -0.06); pivot.add(p1);
+    const p2 = new THREE.Mesh(new THREE.BoxGeometry(doorW/2-0.4, 1.3, 0.07), new THREE.MeshLambertMaterial({color:0x4a3018}));
+    p2.position.set(lo, doorH*0.38, -0.06); pivot.add(p2);
+    // Vitre supérieure
+    const gl = new THREE.Mesh(new THREE.BoxGeometry(doorW/2-0.5, 0.9, 0.05), mWinGlass);
+    gl.position.set(lo, doorH-0.6, -0.05); pivot.add(gl);
+    // Poignée côté cour (Z+)
+    const hnd = new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.035,0.28,8), new THREE.MeshLambertMaterial({color:0xc8a030}));
+    hnd.rotation.z=Math.PI/2; hnd.position.set(lo*2*0.9, doorH*0.5, 0.13); pivot.add(hnd);
+  });
+
+  return {
+    leaves,
+    pos: new THREE.Vector3(0, 1.7, -26.5),
+    outDir: 0,
+    isBack: true
+  };
+}
+const sdBack = makeBackDoor();
+
+// ─── CHAMBRE VIDE derrière la porte du fond ────
+// Limites : X -20.21 à +14.80, Z -27 à -35.50
+{
+  const roomXmin = -20.21, roomXmax = 14.80;
+  const roomZfront = -27, roomZback = -35.50;
+  const roomW = roomXmax - roomXmin;         // 35.01
+  const roomD = roomZback - roomZfront;      // -8.50 (négatif donc abs)
+  const roomCX = (roomXmin + roomXmax) / 2;  // -2.705
+  const roomCZ = (roomZfront + roomZback) / 2; // -31.25
+  const roomH = 5;
+  const wallT = 0.35;
+  const mRoom = new THREE.MeshLambertMaterial({color:0xddd4b8, map:stoneTex});
+  const mFloor = new THREE.MeshLambertMaterial({color:0xc8b898, map:paveTex});
+  const mCeiling = new THREE.MeshLambertMaterial({color:0xe8e0cc});
+
+  // Sol
+  const floorPl = new THREE.Mesh(new THREE.PlaneGeometry(roomW, Math.abs(roomD)), mFloor);
+  floorPl.rotation.x = -Math.PI/2;
+  floorPl.position.set(roomCX, 0.01, roomCZ);
+  floorPl.receiveShadow = true;
+  scene.add(floorPl);
+
+  // Plafond découpé : on enlève la zone cage d'escalier (X=-20.21 à -12.23)
+  // Seule la partie droite (X=-12.23 à +14.80) a un plafond
+  const stairCutXmax = -12.23;
+  const ceilRightW = roomXmax - stairCutXmax;
+  const ceilRightCX = (stairCutXmax + roomXmax) / 2;
+  const ceilPl = new THREE.Mesh(new THREE.PlaneGeometry(ceilRightW, Math.abs(roomD)), mCeiling);
+  ceilPl.rotation.x = Math.PI/2;
+  ceilPl.position.set(ceilRightCX, roomH, roomCZ);
+  scene.add(ceilPl);
+
+  // Mur gauche (X = roomXmin)
+  box(wallT, roomH, Math.abs(roomD), mRoom, roomXmin, roomH/2, roomCZ);
+  // Mur droit (X = roomXmax)
+  box(wallT, roomH, Math.abs(roomD), mRoom, roomXmax, roomH/2, roomCZ);
+  // Mur du fond (Z = roomZback)
+  box(roomW + wallT*2, roomH, wallT, mRoom, roomCX, roomH/2, roomZback);
+
+  // Mur avant avec trou pour la porte (Z = -27)
+  // Porte centrée en X=0, largeur 4.4
+  const bdoorW = 4.4;
+  // Segment gauche : de roomXmin à -bdoorW/2
+  // Segment gauche avec ouverture à X=-17.91 (largeur 3.0) — ne touche ni surveillant (X<-20.21) ni bureau (X>-12.23)
+  box(0.80, roomH, wallT, mRoom, -19.81, roomH/2, roomZfront); // X=-20.21 à -19.41
+  box(14.21, roomH, wallT, mRoom, -9.305, roomH/2, roomZfront); // X=-16.41 à -2.2
+  box(3.2, roomH - 4.2, wallT, mRoom, -17.91, 4.2 + (roomH-4.2)/2, roomZfront); // bandeau dessus
+  // Segment droit : de +bdoorW/2 à roomXmax
+  const rightSegW = roomXmax - bdoorW/2;
+  const rightSegCX = bdoorW/2 + rightSegW/2;
+  box(rightSegW, roomH, wallT, mRoom, rightSegCX, roomH/2, roomZfront);
+  // Bandeau au-dessus de la porte
+  box(bdoorW + 0.4, roomH - 4.6, wallT, mRoom, 0, 4.6 + (roomH - 4.6)/2, roomZfront);
+
+  // ─── MUR DE SÉPARATION à X=-12.23 (arrête la chambre du principal ici) ───
+  box(wallT, roomH, Math.abs(roomD), mRoom, -12.23, roomH/2, roomCZ);
+
+  // Lumières réparties dans la chambre
+  [-10, 2, roomCX+8].forEach(lx => {
+    const roomLight = new THREE.PointLight(0xffe8c0, 0.5, 14);
+    roomLight.position.set(lx, roomH - 0.5, roomCZ);
+    scene.add(roomLight);
+    // Ampoule
+    const bulbMat2 = new THREE.MeshBasicMaterial({color: 0xffe8a0});
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), bulbMat2);
+    bulb.position.set(lx, roomH - 0.4, roomCZ);
+    scene.add(bulb);
+    // Fil
+    const wireMat2 = new THREE.MeshLambertMaterial({color:0x222222});
+    const wire = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.5, 4), wireMat2);
+    wire.position.set(lx, roomH - 0.15, roomCZ);
+    scene.add(wire);
+  });
+}
+
+// ─── CHAMBRE VIDE GAUCHE (à gauche de la chambre principale, porte mystère) ────
+// Position : X -20.21 (mur partagé) → X -27.5 (mur latéral gauche)
+//            Z -27 (mur avant, porte à X=-23.17) → Z -35.50 (mur du fond aligné)
+{
+  const rXmin = -36.0,   rXmax = -20.21;   // paroi droite = mur gauche chambre principale, paroi gauche = mur extérieur 2e couloir
+  const rZfront = -27,   rZback = -35.50;
+  const rW  = rXmax - rXmin;               // ~7.29
+  const rD  = Math.abs(rZback - rZfront);  // 8.50
+  const rCX = (rXmin + rXmax) / 2;         // ~-23.855
+  const rCZ = (rZfront + rZback) / 2;      // -31.25
+  const rH  = 5, wT = 0.35;
+  const mRoom    = new THREE.MeshLambertMaterial({color:0xddd4b8, map:stoneTex});
+  const mFloor   = new THREE.MeshLambertMaterial({color:0xc8b898, map:paveTex});
+  const mCeiling = new THREE.MeshLambertMaterial({color:0xe8e0cc});
+
+  // Sol
+  const floorPl2 = new THREE.Mesh(new THREE.PlaneGeometry(rW, rD), mFloor);
+  floorPl2.rotation.x = -Math.PI/2;
+  floorPl2.position.set(rCX, 0.01, rCZ);
+  floorPl2.receiveShadow = true;
+  scene.add(floorPl2);
+
+  // Plafond
+  const ceilPl2 = new THREE.Mesh(new THREE.PlaneGeometry(rW, rD), mCeiling);
+  ceilPl2.rotation.x = Math.PI/2;
+  ceilPl2.position.set(rCX, rH, rCZ);
+  scene.add(ceilPl2);
+
+  // Mur gauche (X = rXmin, bord extérieur)
+  box(wT, rH, rD, mRoom, rXmin, rH/2, rCZ);
+
+  // Mur droit (X = rXmax) — partagé avec la chambre principale, on l'ajoute entier
+  box(wT, rH, rD, mRoom, rXmax, rH/2, rCZ);
+
+  // Mur du fond (Z = rZback)
+  box(rW + wT*2, rH, wT, mRoom, rCX, rH/2, rZback);
+
+  // Mur avant (Z = rZfront = -27) avec trou pour la porte mystère
+  // Porte mystère centrée en X = -22.35, largeur 3.4
+  const mdoorW = 3.4, mdoorH = 4.2;
+  const mdoorX = -22.35;
+  // Segment gauche : de rXmin à (mdoorX - mdoorW/2)
+  const lsW2 = (mdoorX - mdoorW/2) - rXmin;
+  if(lsW2 > 0.02) box(lsW2, rH, wT, mRoom, rXmin + lsW2/2, rH/2, rZfront);
+  // Segment droit : de (mdoorX + mdoorW/2) à rXmax
+  const rsX2start = mdoorX + mdoorW/2;
+  const rsW2 = rXmax - rsX2start;
+  if(rsW2 > 0.02) box(rsW2, rH, wT, mRoom, rsX2start + rsW2/2, rH/2, rZfront);
+  // Bandeau au-dessus de la porte mystère
+  box(mdoorW + 0.4, rH - mdoorH, wT, mRoom, mdoorX, mdoorH + (rH - mdoorH)/2, rZfront);
+
+
+  // Lumière intérieure
+  const rLight = new THREE.PointLight(0xffe8c0, 0.55, 12);
+  rLight.position.set(rCX, rH - 0.5, rCZ);
+  scene.add(rLight);
+  const rBulb = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), new THREE.MeshBasicMaterial({color:0xffe8a0}));
+  rBulb.position.set(rCX, rH - 0.4, rCZ);
+  scene.add(rBulb);
+  const rWire = new THREE.Mesh(new THREE.CylinderGeometry(0.01,0.01,0.5,4), new THREE.MeshLambertMaterial({color:0x222222}));
+  rWire.position.set(rCX, rH - 0.15, rCZ);
+  scene.add(rWire);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ─── MURS 1ER ÉTAGE : ferment le vide autour du corridor ──────────
+// Le corridor 1er étage va de Z=-27 à Z=15.8, entre X=-24 et X=+24
+// Y=5 à Y=10, pierre extérieure (mStone), avec fenêtres
+// ═══════════════════════════════════════════════════════════════════
+{
+  const yOff = 5;
+  const cH   = 5;
+  const D    = 0.4;
+  const mS   = mStone;
+
+  const fw = 1.8, fh = 2.4, fcy = yOff + 2.6;
+  const fBot = fcy - fh/2;
+  const fTop = fcy + fh/2;
+
+  // ═══════════════════════════════════════════════════
+  // 1) MUR FAÇADE Z=-19.5 — au-dessus de la porte principale, côté cour
+  //    De X=-24 à X=+24, avec 6 fenêtres (mêmes X que RDC)
+  // ═══════════════════════════════════════════════════
+  {
+    const Z = -19.5;
+    const xMin = -24, xMax = 24;
+    const wins = [-18.5, -14, -10, 10, 14, 18.5];
+    const fw2 = 1.6; // largeur fenêtre façade (makeWindow)
+
+    box(xMax-xMin, fBot-yOff, D, mS, 0, yOff+(fBot-yOff)/2, Z);
+    box(xMax-xMin, (yOff+cH)-fTop, D, mS, 0, fTop+((yOff+cH)-fTop)/2, Z);
+    const cuts0 = [];
+    let p0 = xMin;
+    [...wins].sort((a,b)=>a-b).forEach(wx=>{ cuts0.push([p0, wx-fw2/2]); p0=wx+fw2/2; });
+    cuts0.push([p0, xMax]);
+    cuts0.forEach(([x1,x2])=>{ const w=x2-x1; if(w>0.01) box(w,fh,D,mS,(x1+x2)/2,fcy,Z); });
+    wins.forEach(wx => makeWindow(wx, fcy, Z));
+  }
+
+  // ═══════════════════════════════════════════════════
+  // 2) MUR LATÉRAL GAUCHE X=-24
+  //    De Z=-19.5 à Z=15.8, côté cour intérieure
+  //    Fenêtres aux mêmes Z que le RDC : 12, 5.5, -1, -6
+  // ═══════════════════════════════════════════════════
+  {
+    const X = -24;
+    const zMin = -19.5, zMax = 15.8;
+    const wins = [12, 5.5, -1, -6];
+
+    box(D, fBot-yOff, zMax-zMin, mS, X, yOff+(fBot-yOff)/2, (zMin+zMax)/2);
+    box(D, (yOff+cH)-fTop, zMax-zMin, mS, X, fTop+((yOff+cH)-fTop)/2, (zMin+zMax)/2);
+    const cuts1 = [];
+    let p1 = zMin;
+    [...wins].sort((a,b)=>a-b).forEach(wz=>{ cuts1.push([p1, wz-fw/2]); p1=wz+fw/2; });
+    cuts1.push([p1, zMax]);
+    cuts1.forEach(([z1,z2])=>{ const l=z2-z1; if(l>0.01) box(D,fh,l,mS,X,fcy,(z1+z2)/2); });
+    wins.forEach(wz => makeWindowZ(X, fcy, wz, 1));
+  }
+
+  // ═══════════════════════════════════════════════════
+  // 3) MUR LATÉRAL DROIT X=+24 (symétrique)
+  // ═══════════════════════════════════════════════════
+  {
+    const X = 24;
+    const zMin = -19.5, zMax = 15.8;
+    const wins = [12, 5.5, -1, -6];
+
+    box(D, fBot-yOff, zMax-zMin, mS, X, yOff+(fBot-yOff)/2, (zMin+zMax)/2);
+    box(D, (yOff+cH)-fTop, zMax-zMin, mS, X, fTop+((yOff+cH)-fTop)/2, (zMin+zMax)/2);
+    const cuts2 = [];
+    let p2 = -19.5;
+    [...wins].sort((a,b)=>a-b).forEach(wz=>{ cuts2.push([p2, wz-fw/2]); p2=wz+fw/2; });
+    cuts2.push([p2, zMax]);
+    cuts2.forEach(([z1,z2])=>{ const l=z2-z1; if(l>0.01) box(D,fh,l,mS,X,fcy,(z1+z2)/2); });
+    wins.forEach(wz => makeWindowZ(X, fcy, wz, -1));
+  }
+
+  // ═══════════════════════════════════════════════════
+  // 4) FERMETURE coins corridor 1er étage : X=±24, Z=15.8 à Z=18
+  // ═══════════════════════════════════════════════════
+  [-24, 24].forEach(X => {
+    box(D, cH, 18 - 15.8, mS, X, yOff + cH/2, (15.8 + 18) / 2);
+  });
+
+  // ═══════════════════════════════════════════════════
+  // 4b) FERMETURE bout des couloirs latéraux 1er étage
+  //     2 murs dans le plan XZ à Z=17, entre X=±24 et X=±27
+  //     (ferme le renfoncement devant les portes de classe)
+  //     Coordonnées référence : X:25.40 Y:6.21 Z:17.00
+  // ═══════════════════════════════════════════════════
+  // ── Renfoncement devant portes de classe (Z=15.8 → 18.5, X=±24 à ±27) ──
+  // Mur de fermeture avant (Z=18.5), largeur 3, côté droit et gauche
+  box(3, cH, D, mS,  25.5, yOff + cH/2, 18.5);
+  box(3, cH, D, mS, -25.5, yOff + cH/2, 18.5);
+  // Mur latéral intérieur X=±24 : segment Z=15.8 → 18.5 (complète le mur latéral)
+  box(D, cH, 18.5 - 15.8, mS,  24, yOff + cH/2, (15.8 + 18.5) / 2);
+  box(D, cH, 18.5 - 15.8, mS, -24, yOff + cH/2, (15.8 + 18.5) / 2);
+  // Mur latéral extérieur X=±27 : de Z=-27 à Z=18.5 (ferme l'extérieur du renfoncement)
+  box(D, cH, 18.5 - 15.8, mS,  27, yOff + cH/2, (15.8 + 18.5) / 2);
+  box(D, cH, 18.5 - 15.8, mS, -27, yOff + cH/2, (15.8 + 18.5) / 2);
+
+  // ═══════════════════════════════════════════════════
+  // 5) BOUCHER le vide au-dessus des portes latérales RDC (X=±24, Z=-10)
+  //    Porte RDC h=4.2 → combler de Y=4.2 à Y=5
+  // ═══════════════════════════════════════════════════
+  [-24, 24].forEach(X => {
+    box(D, yOff - 4.2, 3.0 + 0.8, mS, X, 4.2 + (yOff-4.2)/2, -10);
+  });
+}
+
+// ─── CHAMBRE SURVEILLANT 1ER ÉTAGE (reproduction exacte au-dessus, yOffset=5) ────
+// Même position, mêmes murs, même sol, même plafond — porte avec cadenas doré + INTERDIT
+{
+  const rXmin = -36.0,   rXmax = -20.21;
+  const rZfront = -27,   rZback = -35.50;
+  const rW  = rXmax - rXmin;
+  const rD  = Math.abs(rZback - rZfront);
+  const rCX = (rXmin + rXmax) / 2;
+  const rCZ = (rZfront + rZback) / 2;
+  const rH  = 5, wT = 0.35;
+  const yOff = 5; // 1er étage
+
+  const mRoom2    = new THREE.MeshLambertMaterial({color:0xddd4b8, map:stoneTex});
+  const mFloor2   = new THREE.MeshLambertMaterial({color:0xc8b898, map:paveTex});
+  const mCeiling2 = new THREE.MeshLambertMaterial({color:0xe8e0cc});
+
+  // Sol
+  const floorPl3 = new THREE.Mesh(new THREE.PlaneGeometry(rW, rD), mFloor2);
+  floorPl3.rotation.x = -Math.PI/2;
+  floorPl3.position.set(rCX, yOff + 0.01, rCZ);
+  floorPl3.receiveShadow = true;
+  scene.add(floorPl3);
+
+  // Plafond
+  const ceilPl3 = new THREE.Mesh(new THREE.PlaneGeometry(rW, rD), mCeiling2);
+  ceilPl3.rotation.x = Math.PI/2;
+  ceilPl3.position.set(rCX, yOff + rH, rCZ);
+  scene.add(ceilPl3);
+
+  // Mur gauche (X = rXmin)
+  box(wT, rH, rD, mRoom2, rXmin, yOff + rH/2, rCZ);
+  // Mur droit (X = rXmax)
+  box(wT, rH, rD, mRoom2, rXmax, yOff + rH/2, rCZ);
+  // Mur du fond (Z = rZback)
+  box(rW + wT*2, rH, wT, mRoom2, rCX, yOff + rH/2, rZback);
+
+  // Mur avant (Z = rZfront = -27) avec trou pour la porte — même position X=-22.35, larg=3.4
+  const mdoorW2 = 3.4, mdoorH2 = 4.2;
+  const mdoorX2 = -22.35;
+  const lsW3 = (mdoorX2 - mdoorW2/2) - rXmin;
+  if(lsW3 > 0.02) box(lsW3, rH, wT, mRoom2, rXmin + lsW3/2, yOff + rH/2, rZfront);
+  const rsX3start = mdoorX2 + mdoorW2/2;
+  const rsW3 = rXmax - rsX3start;
+  if(rsW3 > 0.02) box(rsW3, rH, wT, mRoom2, rsX3start + rsW3/2, yOff + rH/2, rZfront);
+  box(mdoorW2 + 0.4, rH - mdoorH2, wT, mRoom2, mdoorX2, yOff + mdoorH2 + (rH - mdoorH2)/2, rZfront);
+
+  // ── PORTE 1ER ÉTAGE (même style que la porte mystère, mais INTERDIT + cadenas) ──
+  {
+    const doorW = mdoorW2, doorH = mdoorH2;
+    const doorX = mdoorX2, doorZ = rZfront;
+    const mStoneLight2 = new THREE.MeshLambertMaterial({color:0xe0d8c0});
+    const mDarkWood2 = new THREE.MeshLambertMaterial({color:0x2a1a08});
+    const mGoldPL = new THREE.MeshLambertMaterial({color:0xd4a010});
+    const mGoldPLDk = new THREE.MeshLambertMaterial({color:0xa07808});
+
+    // Piliers de pierre de chaque côté
+    [-doorW/2-0.18, doorW/2+0.18].forEach(dx=>{
+      box(0.48, doorH+0.4, 0.44, mStoneLight2, doorX+dx, yOff+(doorH+0.4)/2, doorZ+0.05);
+      box(0.65, 0.20, 0.60, new THREE.MeshLambertMaterial({color:0xd4ccb8}), doorX+dx, yOff+doorH+0.4, doorZ+0.05);
+    });
+    // Linteau
+    box(doorW+1.0, 0.38, 0.44, mStoneLight2, doorX, yOff+doorH+0.18, doorZ+0.05);
+    // Arc décoratif
+    const archGeo2 = new THREE.TorusGeometry(1.7, 0.14, 6, 12, Math.PI);
+    const archM2 = new THREE.Mesh(archGeo2, mStoneLight2);
+    archM2.rotation.x = -Math.PI/2; archM2.rotation.z = Math.PI;
+    archM2.position.set(doorX, yOff+doorH+0.12, doorZ+0.05); scene.add(archM2);
+
+    // Texture "INTERDIT" pour la porte
+    const interditCanvas = document.createElement('canvas');
+    interditCanvas.width = 256; interditCanvas.height = 512;
+    const iCtx = interditCanvas.getContext('2d');
+    // Fond bois foncé
+    iCtx.fillStyle = '#2a1a08'; iCtx.fillRect(0,0,256,512);
+    for(let i=0;i<256;i+=6){
+      iCtx.fillStyle=`rgba(80,50,10,${0.05+Math.random()*0.06})`;
+      iCtx.fillRect(i,0,3,512);
+    }
+    // Panneau rouge INTERDIT
+    const px3=18, py3=512*0.28, pw3=220, ph3=120;
+    iCtx.fillStyle='#8b0000'; iCtx.fillRect(px3-4, py3-4, pw3+8, ph3+8);
+    iCtx.fillStyle='#cc0000'; iCtx.fillRect(px3, py3, pw3, ph3);
+    iCtx.strokeStyle='#ff4444'; iCtx.lineWidth=3; iCtx.strokeRect(px3+5, py3+5, pw3-10, ph3-10);
+    iCtx.fillStyle='#ffffff';
+    iCtx.font='bold 54px Arial, sans-serif';
+    iCtx.textAlign='center'; iCtx.textBaseline='middle';
+    iCtx.shadowColor='rgba(0,0,0,0.8)'; iCtx.shadowBlur=6;
+    iCtx.fillText('INTERDIT', 128, py3+ph3/2);
+    iCtx.shadowBlur=0;
+    // Croix rouge dessous
+    iCtx.fillStyle='#ff2020'; iCtx.font='bold 56px Arial';
+    iCtx.fillText('🚫', 128, py3+ph3+65);
+    const interditTex = new THREE.CanvasTexture(interditCanvas);
+
+    // 2 vantaux
+    const leaves2 = [];
+    [-1, 1].forEach((side, idx)=>{
+      const pivot2 = new THREE.Group();
+      pivot2.position.set(doorX + side*(doorW/2-0.06), yOff, doorZ+0.08);
+      scene.add(pivot2);
+      leaves2.push({pivot: pivot2, side});
+      const lo = -side*(doorW/4);
+
+      // Vantail idx==1 → "INTERDIT"
+      const leafMat2 = idx === 1
+        ? new THREE.MeshLambertMaterial({map: interditTex})
+        : mDarkWood2;
+      const leaf2 = new THREE.Mesh(new THREE.BoxGeometry(doorW/2-0.1, doorH-0.12, 0.10), leafMat2);
+      leaf2.position.set(lo, (doorH-0.12)/2, 0); leaf2.castShadow=true; pivot2.add(leaf2);
+      const p1 = new THREE.Mesh(new THREE.BoxGeometry(doorW/2-0.4, 1.4, 0.07), mDarkWood2);
+      p1.position.set(lo, doorH*0.74, 0.06); pivot2.add(p1);
+      const p2b = new THREE.Mesh(new THREE.BoxGeometry(doorW/2-0.4, 1.2, 0.07), mDarkWood2);
+      p2b.position.set(lo, doorH*0.38, 0.06); pivot2.add(p2b);
+      const gl2 = new THREE.Mesh(new THREE.BoxGeometry(doorW/2-0.45, 0.75, 0.05), mWinGlass);
+      gl2.position.set(lo, doorH-0.55, 0.05); pivot2.add(gl2);
+    });
+
+    // ── CADENAS DORÉ sur la porte du 1er étage ──
+    const plGroup2 = new THREE.Group();
+    // Centré entre les 2 vantaux, hauteur milieu porte, légèrement devant
+    plGroup2.position.set(doorX, yOff + doorH * 0.44, doorZ + 0.14);
+    scene.add(plGroup2);
+    // Corps du cadenas
+    const plBody2 = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.28, 0.14), mGoldPL);
+    plBody2.position.set(0,0,0); plGroup2.add(plBody2);
+    // Partie haute du corps
+    const plTop2 = new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.09,0.14,12), mGoldPL);
+    plTop2.rotation.x = Math.PI/2; plTop2.position.set(0,0.14,0); plGroup2.add(plTop2);
+    // Arc (anse)
+    const plArc2 = new THREE.Mesh(new THREE.TorusGeometry(0.075,0.025,8,12,Math.PI), mGoldPLDk);
+    plArc2.rotation.x = Math.PI/2; plArc2.position.set(0,0.29,0); plGroup2.add(plArc2);
+    // Trou de serrure
+    const plHole2 = new THREE.Mesh(new THREE.CircleGeometry(0.045,8), new THREE.MeshLambertMaterial({color:0x0a0a0a}));
+    plHole2.position.set(0,0,0.075); plGroup2.add(plHole2);
+    const plSlot2 = new THREE.Mesh(new THREE.BoxGeometry(0.020,0.060,0.012), new THREE.MeshLambertMaterial({color:0x0a0a0a}));
+    plSlot2.position.set(0,-0.055,0.075); plGroup2.add(plSlot2);
+    // Reflets dorés
+    const plShine = new THREE.Mesh(new THREE.BoxGeometry(0.06,0.10,0.01), new THREE.MeshLambertMaterial({color:0xffe060}));
+    plShine.position.set(-0.06, 0.05, 0.075); plGroup2.add(plShine);
+  }
+
+  // Lumière intérieure
+  const rLight2 = new THREE.PointLight(0xffe8c0, 0.55, 12);
+  rLight2.position.set(rCX, yOff + rH - 0.5, rCZ);
+  scene.add(rLight2);
+  const rBulb2 = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), new THREE.MeshBasicMaterial({color:0xffe8a0}));
+  rBulb2.position.set(rCX, yOff + rH - 0.4, rCZ);
+  scene.add(rBulb2);
+  const rWire2 = new THREE.Mesh(new THREE.CylinderGeometry(0.01,0.01,0.5,4), new THREE.MeshLambertMaterial({color:0x222222}));
+  rWire2.position.set(rCX, yOff + rH - 0.15, rCZ);
+  scene.add(rWire2);
+}
+
+// ─── ESCALIER EN U — chambre sans porte entre X=-20.21 et X=-12.23 ────
+// Entrée : X=-17.23 Z=-26.45 (ouverture dans le mur Z=-27, largeur 3 centrée à X=-17.91)
+// Chambre : X=-20.21 à -12.23 (larg≈8), Z=-27 à -35.5 (prof=8.5)
+// L'escalier en U monte de Y=0 à Y=5 :
+//   Volée 1 : longe le mur droit X=-12.23, vers Z-
+//   Palier  : au fond Z≈-35
+//   Volée 2 : longe le mur gauche X=-20.21, revient vers Z+, arrive à Y=5
+{
+  const mStair = new THREE.MeshLambertMaterial({color:0xc8b490});
+  const mRiser = new THREE.MeshLambertMaterial({color:0xb0a078});
+  const mRail  = new THREE.MeshLambertMaterial({color:0x5a3a18});
+  const mPost  = new THREE.MeshLambertMaterial({color:0x4a2e10});
+
+  // Dimensions ajustées à l'espace (larg=8, prof=8.5)
+  // 10 marches/volée, stepH=0.25, stepD=0.75 → 10×0.75=7.5 ← tient dans 8.5
+  const nSteps = 10;
+  const stepH  = 0.25;   // 10×0.25 = 2.5 par volée → 2×2.5 = 5 = hauteur totale ✓
+  const stepD  = 0.75;   // profondeur giron
+  const stepW  = 3.2;    // largeur marche (chambre ≈ 8, moitié ≈ 4, on garde 3.2 pour laisser passage)
+
+  // ── VOLÉE 1 : côté GAUCHE (X centré ≈ -18.6, près de l'ouverture X=-17.91), avance vers Z-
+  const v1Xcenter = -18.6;
+  const v1Zstart  = -27.5;  // on démarre juste après le mur Z=-27
+  for(let i = 0; i < nSteps; i++){
+    const y = i * stepH;
+    const z = v1Zstart - i * stepD;
+    // Giron
+    const g = new THREE.Mesh(new THREE.BoxGeometry(stepW, 0.10, stepD), mStair);
+    g.position.set(v1Xcenter, y + stepH, z - stepD/2);
+    g.castShadow = true; scene.add(g);
+    // Contremarche
+    const r = new THREE.Mesh(new THREE.BoxGeometry(stepW, stepH, 0.07), mRiser);
+    r.position.set(v1Xcenter, y + stepH/2, z);
+    scene.add(r);
+  }
+
+  // ── PALIER au fond
+  const landingY = nSteps * stepH;  // Y=2.5
+  const landingZcenter = v1Zstart - nSteps * stepD - 1.5; // centre du palier ≈ -36.5
+
+  // Palier positionné pour rester dans la pièce (Z=-27 à -35.5)
+  // On le décale légèrement : centre à Z=-34.5 pour qu'il tienne
+  const landingZcenterFixed = -34.0;
+  const landingMesh = new THREE.Mesh(new THREE.BoxGeometry(7.5, 0.12, 2.5), mStair);
+  landingMesh.position.set(-16.2, landingY + 0.06, landingZcenterFixed);
+  landingMesh.castShadow = true; scene.add(landingMesh);
+
+  // ── VOLÉE 2 : côté DROIT (X centré ≈ -13.8), repart du fond vers Z+ (vers Z=-27)
+  const v2Xcenter = -13.8;
+  const v2Zstart  = landingZcenterFixed - 0.8;  // démarre juste avant le palier (côté fond)
+  // La volée 2 monte vers Z+ (retour vers l'entrée)
+  for(let i = 0; i < nSteps; i++){
+    const y = landingY + i * stepH;
+    const z = v2Zstart + i * stepD;
+    const g = new THREE.Mesh(new THREE.BoxGeometry(stepW, 0.10, stepD), mStair);
+    g.position.set(v2Xcenter, y + stepH, z + stepD/2);
+    g.castShadow = true; scene.add(g);
+    const r = new THREE.Mesh(new THREE.BoxGeometry(stepW, stepH, 0.07), mRiser);
+    r.position.set(v2Xcenter, y + stepH/2, z + stepD);
+    scene.add(r);
+  }
+
+  // ── RAMBARDES VOLÉE 1 (poteaux tous les 2 marches)
+  for(let i = 0; i <= nSteps; i += 2){
+    const py = i * stepH;
+    const pz = v1Zstart - i * stepD;
+    [v1Xcenter - stepW/2 + 0.1, v1Xcenter + stepW/2 - 0.1].forEach(px=>{
+      const p = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.85, 0.07), mPost);
+      p.position.set(px, py + 0.42, pz - stepD/2);
+      scene.add(p);
+    });
+  }
+  // Main courante volée 1 (inclinée)
+  const rcLen1 = Math.sqrt((nSteps*stepD)**2 + (nSteps*stepH)**2) + 0.3;
+  const rcAngle1 = Math.atan2(nSteps*stepH, nSteps*stepD);
+  [v1Xcenter - stepW/2 + 0.1, v1Xcenter + stepW/2 - 0.1].forEach(px=>{
+    const rc = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, rcLen1), mRail);
+    rc.position.set(px, landingY + 0.82, v1Zstart - nSteps*stepD/2);
+    rc.rotation.x = rcAngle1;
+    scene.add(rc);
+  });
+
+  // ── RAMBARDES VOLÉE 2
+  for(let i = 0; i <= nSteps; i += 2){
+    const py = landingY + i * stepH;
+    const pz = v2Zstart + i * stepD;
+    [v2Xcenter - stepW/2 + 0.1, v2Xcenter + stepW/2 - 0.1].forEach(px=>{
+      const p = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.85, 0.07), mPost);
+      p.position.set(px, py + 0.42, pz + stepD/2);
+      scene.add(p);
+    });
+  }
+  const rcLen2 = Math.sqrt((nSteps*stepD)**2 + (nSteps*stepH)**2) + 0.3;
+  [v2Xcenter - stepW/2 + 0.1, v2Xcenter + stepW/2 - 0.1].forEach(px=>{
+    const rc = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, rcLen2), mRail);
+    rc.position.set(px, landingY + nSteps*stepH/2 + 0.82, v2Zstart + nSteps*stepD/2);
+    rc.rotation.x = -rcAngle1;
+    scene.add(rc);
+  });
+
+  // Lumière dans la cage d'escalier
+  const stairLight = new THREE.PointLight(0xffe8c0, 0.7, 12);
+  stairLight.position.set(-16.2, 3.5, -31.5);
+  scene.add(stairLight);
+}
+
+function makeEndDoor(faceX, outDir, label='', yOffset=0){
+  const doorW = 3.8, doorH = 4.5;
+  const doorZ = 15.8;
+  const mStoneLight = new THREE.MeshLambertMaterial({color:0xe0d8c0});
+
+  // Piliers haut et bas en Z
+  [-doorW/2-0.15, doorW/2+0.15].forEach(dz=>{
+    box(0.5, doorH+0.4, 0.45, mStoneLight, faceX+outDir*0.1, yOffset+(doorH+0.4)/2, doorZ+dz);
+  });
+  // Linteau
+  box(0.4, 0.42, doorW+0.8, mStoneLight, faceX+outDir*0.1, yOffset+doorH+0.2, doorZ);
+
+  const leaves = [];
+  const leafW = doorW/2 - 0.08;
+  [-1,1].forEach((lr, idx)=>{
+    const pivot = new THREE.Group();
+    pivot.position.set(faceX+outDir*0.3, yOffset, doorZ + lr*(doorW/2-0.05));
+    scene.add(pivot);
+    leaves.push({pivot, lr});
+    const localZ = -lr*(leafW/2);
+
+    // Vantail lr==1 (premier) → applique le label
+    const leafMat = (idx === 0 && label)
+      ? new THREE.MeshLambertMaterial({map: makeDoorLabelTex(label)})
+      : mWood;
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.12, doorH-0.1, leafW), leafMat);
+    leaf.position.set(0, (doorH-0.1)/2, localZ); leaf.castShadow=true; pivot.add(leaf);
+    [0.76, 0.43, 0.15].forEach((yr,pi)=>{
+      const ph=[1.0,1.1,0.75][pi];
+      const p=new THREE.Mesh(new THREE.BoxGeometry(0.07,ph,leafW-0.2),new THREE.MeshLambertMaterial({color:0x3a2010}));
+      p.position.set(outDir*0.04, doorH*yr, localZ); pivot.add(p);
+    });
+    const gl=new THREE.Mesh(new THREE.BoxGeometry(0.06,0.6,leafW-0.25),mWinGlass);
+    gl.position.set(outDir*0.04, doorH-0.5, localZ); pivot.add(gl);
+    // Poignée côté couloir (face outDir)
+    const hndE=new THREE.Mesh(new THREE.CylinderGeometry(0.032,0.032,0.22,8),new THREE.MeshLambertMaterial({color:0xc8a030}));
+    hndE.rotation.x=Math.PI/2; hndE.position.set(outDir*0.12, doorH*0.5, localZ*2*0.9); pivot.add(hndE);
+  });
+  return { leaves, pos: new THREE.Vector3(faceX+outDir*0.2, yOffset+1.7, doorZ), outDir };
+}
+const sdEndL = makeEndDoor(-27,  1, 'Classe 5è C');
+const sdEndR = makeEndDoor( 27, -1, 'Classe 5è D');
+// Classe 5e A au premier étage — juste au-dessus de la Classe 5e D (yOffset = 5)
+const sdEndA = makeEndDoor( 27, -1, 'Classe 5è A', 5);
+// Classe 5e B au premier étage — juste au-dessus de la Classe 5e C (yOffset = 5)
+const sdEndB = makeEndDoor(-27,  1, 'Classe 5è B', 5);
+
+// (Portes end2 et side2 supprimées — murs X=±36 pleins, chambres fermées)
+
+// (Portes portal2Left et portal2Right supprimées — murs Z=18 pleins côté 2e couloir)
+
+// ─── PORTE MYSTÈRE : mur Z=-27, trou gauche, centrée en X=-22.35 ─────────────
+function makeMysteryDoor(){
+  const doorW = 3.4, doorH = 4.2;
+  const doorX = -22.35, doorZ = -27;
+  const mStoneLight = new THREE.MeshLambertMaterial({color:0xe0d8c0});
+  const mDarkWood = new THREE.MeshLambertMaterial({color:0x2a1a08});
+
+  // Piliers de pierre de chaque côté
+  [-doorW/2-0.18, doorW/2+0.18].forEach(dx=>{
+    box(0.48, doorH+0.4, 0.44, mStoneLight, doorX+dx, (doorH+0.4)/2, doorZ+0.05);
+    box(0.65, 0.20, 0.60, new THREE.MeshLambertMaterial({color:0xd4ccb8}), doorX+dx, doorH+0.4, doorZ+0.05);
+  });
+  // Linteau
+  box(doorW+1.0, 0.38, 0.44, mStoneLight, doorX, doorH+0.18, doorZ+0.05);
+  // Arc décoratif
+  const archGeo = new THREE.TorusGeometry(1.7, 0.14, 6, 12, Math.PI);
+  const archM = new THREE.Mesh(archGeo, mStoneLight);
+  archM.rotation.x = -Math.PI/2; archM.rotation.z = Math.PI;
+  archM.position.set(doorX, doorH+0.12, doorZ+0.05); scene.add(archM);
+
+  // 2 vantaux (s'ouvrent vers Z+, c-à-d vers l'intérieur de la cour)
+  const leaves = [];
+  [-1, 1].forEach((side, idx)=>{
+    const pivot = new THREE.Group();
+    pivot.position.set(doorX + side*(doorW/2-0.06), 0, doorZ+0.08);
+    scene.add(pivot);
+    leaves.push({pivot, side});
+    const lo = -side*(doorW/4);
+
+    // Vantail idx==1 (side=+1) → label Surveillant visible depuis la cour (Z+)
+    const leafMat = idx === 1
+      ? new THREE.MeshLambertMaterial({map: makeDoorLabelTex('Surveillant')})
+      : mWood;
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(doorW/2-0.1, doorH-0.12, 0.10), leafMat);
+    leaf.position.set(lo, (doorH-0.12)/2, 0); leaf.castShadow=true; pivot.add(leaf);
+    const p1 = new THREE.Mesh(new THREE.BoxGeometry(doorW/2-0.4, 1.4, 0.07), mDarkWood);
+    p1.position.set(lo, doorH*0.74, 0.06); pivot.add(p1);
+    const p2 = new THREE.Mesh(new THREE.BoxGeometry(doorW/2-0.4, 1.2, 0.07), mDarkWood);
+    p2.position.set(lo, doorH*0.38, 0.06); pivot.add(p2);
+    const gl = new THREE.Mesh(new THREE.BoxGeometry(doorW/2-0.45, 0.75, 0.05), mWinGlass);
+    gl.position.set(lo, doorH-0.55, 0.05); pivot.add(gl);
+    const hnd = new THREE.Mesh(new THREE.CylinderGeometry(0.032,0.032,0.24,8), new THREE.MeshLambertMaterial({color:0xc8a030}));
+    hnd.rotation.z=Math.PI/2; hnd.position.set(lo*2*0.9, doorH*0.5, 0.11); pivot.add(hnd);
+  });
+
+  return {
+    leaves,
+    pos: new THREE.Vector3(doorX, 1.7, doorZ+0.3),
+    outDir: 0,
+    isMystery: true
+  };
+}
+const sdMystery = makeMysteryDoor();
+
+// ─── PORTE SORTIE (mur Z=-27, X=17.2) — style PORTE MÉTALLIQUE INDUSTRIELLE ──
+// Porte simple vantail, vert kaki foncé, barre de poussée, panneau SORTIE lumineux
+function makeSortieDoor(){
+  const doorW = 2.2, doorH = 4.2;
+  const doorX = 17.2, doorZ = -27;
+
+  const mMetal3   = new THREE.MeshLambertMaterial({color:0x3a5a30}); // vert kaki foncé
+  const mMetalDk  = new THREE.MeshLambertMaterial({color:0x2a4020}); // vert très foncé
+  const mMetalRim = new THREE.MeshLambertMaterial({color:0x1a2a14}); // lisière métal noire
+  const mFrameSt  = new THREE.MeshLambertMaterial({color:0xb0b8a0}); // cadre acier gris
+  const mPushBar  = new THREE.MeshLambertMaterial({color:0xd0c080}); // barre laiton
+
+  // Cadre acier autour de la porte (encadrement dans le mur)
+  // Montants
+  [-doorW/2-0.06, doorW/2+0.06].forEach(dx=>{
+    box(0.12, doorH+0.10, 0.28, mFrameSt, doorX+dx, (doorH+0.10)/2, doorZ+0.04);
+  });
+  // Traverse haute
+  box(doorW+0.28, 0.12, 0.28, mFrameSt, doorX, doorH+0.06, doorZ+0.04);
+  // Seuil métal
+  box(doorW+0.28, 0.08, 0.30, mMetalRim, doorX, 0.04, doorZ+0.04);
+
+  // Panneau SORTIE lumineux vert au-dessus (canvas texture)
+  const signCanvas = document.createElement('canvas');
+  signCanvas.width=256; signCanvas.height=96;
+  const sCtx = signCanvas.getContext('2d');
+  // Fond noir mat
+  sCtx.fillStyle='#0a1208'; sCtx.fillRect(0,0,256,96);
+  // Bordure verte
+  sCtx.strokeStyle='#40c030'; sCtx.lineWidth=4;
+  sCtx.strokeRect(4,4,248,88);
+  // Texte SORTIE vert lumineux
+  sCtx.fillStyle='#70ff50'; sCtx.font='bold 48px Arial, sans-serif';
+  sCtx.textAlign='center'; sCtx.textBaseline='middle';
+  sCtx.fillText('SORTIE', 128, 48);
+  // Flèche →
+  sCtx.fillStyle='#50ee30'; sCtx.font='bold 36px Arial';
+  sCtx.fillText('→', 220, 50);
+  const signTex = new THREE.CanvasTexture(signCanvas);
+  const signMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(doorW+0.1, 0.42, 0.06),
+    new THREE.MeshLambertMaterial({map:signTex, emissive:0x103008, emissiveIntensity:0.4})
+  );
+  signMesh.position.set(doorX, doorH+0.36, doorZ+0.08); scene.add(signMesh);
+
+  // Vantail unique (s'ouvre d'un seul côté, pivot à droite)
+  const leaves = [];
+  // On simule 2 leaves mais 1 seul vantail plein (le gauche est invisible/vide)
+  const pivot = new THREE.Group();
+  pivot.position.set(doorX + (doorW/2-0.06), 0, doorZ+0.07);
+  scene.add(pivot);
+
+  // Face avant : grande plaque métal verte
+  const faceLeaf = new THREE.Mesh(new THREE.BoxGeometry(doorW-0.12, doorH-0.10, 0.10), mMetal3);
+  faceLeaf.position.set(-(doorW/2-0.06), (doorH-0.10)/2, 0);
+  faceLeaf.castShadow=true; pivot.add(faceLeaf);
+
+  // Raidisseurs horizontaux (nervures métal)
+  [0.20, 0.45, 0.70].forEach(yr=>{
+    const rib = new THREE.Mesh(new THREE.BoxGeometry(doorW-0.20, 0.06, 0.12), mMetalDk);
+    rib.position.set(-(doorW/2-0.06), doorH*yr, 0.01); pivot.add(rib);
+  });
+
+  // Barre de poussée horizontale (laiton)
+  const pushBar = new THREE.Mesh(new THREE.CylinderGeometry(0.038,0.038, doorW*0.72, 10), mPushBar);
+  pushBar.rotation.z = Math.PI/2;
+  pushBar.position.set(-(doorW/2-0.06), doorH*0.52, 0.12); pivot.add(pushBar);
+  // Supports de barre
+  [-doorW*0.24, doorW*0.24].forEach(dz2=>{
+    const sup = new THREE.Mesh(new THREE.BoxGeometry(0.06,0.16,0.10), mPushBar);
+    sup.position.set(-(doorW/2-0.06)+dz2, doorH*0.52, 0.09); pivot.add(sup);
+  });
+
+  // Petite vitre de sécurité (renforcée, petite, haute)
+  const glSec = new THREE.Mesh(new THREE.BoxGeometry(doorW*0.38, 0.42, 0.05),
+    new THREE.MeshLambertMaterial({color:0xc8e8c0, transparent:true, opacity:0.50}));
+  glSec.position.set(-(doorW/2-0.06), doorH-0.38, 0.06); pivot.add(glSec);
+  // Grillage sur la vitre (croisillon métal)
+  const mWireG = new THREE.MeshLambertMaterial({color:0x808070});
+  box(doorW*0.36, 0.02, 0.04, mWireG, doorX, doorH-0.38, doorZ+0.11);
+  box(0.02, 0.40, 0.04, mWireG, doorX, doorH-0.38, doorZ+0.11);
+
+  leaves.push({pivot, side:-1}); // vantail unique côté droit
+  // Dummy pivot pour le 2e slot (vantail vide, pas visible)
+  const dummyPivot = new THREE.Group();
+  dummyPivot.position.set(doorX - (doorW/2-0.06), 0, doorZ+0.07);
+  scene.add(dummyPivot);
+  leaves.push({pivot: dummyPivot, side:1});
+
+  return { leaves, pos: new THREE.Vector3(doorX, 1.7, doorZ+0.3), outDir:0, singleLeaf:true };
+}
+const sdSortie = makeSortieDoor();
+
+// ─── PORTE TOILETTE (mur Z=-27, X=22.5) — style bleu, panneau WC ────────────
+function makeToiletteDoor(){
+  const doorW = 2.2, doorH = 4.2;
+  const doorX = 22.5, doorZ = -27;
+  const mStoneBl = new THREE.MeshLambertMaterial({color:0xd0cce8});
+  const mDoorTB  = new THREE.MeshLambertMaterial({color:0x607aaa});
+
+  // Texture Toilette sur tout le vantail (grand, lisible)
+  const tCanvas = document.createElement('canvas');
+  tCanvas.width=256; tCanvas.height=512;
+  const tCtx = tCanvas.getContext('2d');
+  // Fond bleu ardoise
+  tCtx.fillStyle='#5a72a8'; tCtx.fillRect(0,0,256,512);
+  // Rainures verticales bois peint
+  for(let i=0;i<256;i+=18){
+    tCtx.fillStyle=`rgba(0,0,0,${0.04+Math.random()*0.04})`;
+    tCtx.fillRect(i,0,1,512);
+  }
+  // Plaquette centrale
+  const px2=28, py2=512*0.30, pw2=200, ph2=100;
+  tCtx.fillStyle='#1a2850'; tCtx.fillRect(px2-3,py2-3,pw2+6,ph2+6);
+  const g2=tCtx.createLinearGradient(px2,py2,px2+pw2,py2+ph2);
+  g2.addColorStop(0,'#dce8ff'); g2.addColorStop(1,'#b8ccee');
+  tCtx.fillStyle=g2; tCtx.fillRect(px2,py2,pw2,ph2);
+  tCtx.strokeStyle='#4a60a0'; tCtx.lineWidth=2; tCtx.strokeRect(px2+4,py2+4,pw2-8,ph2-8);
+  tCtx.fillStyle='#1a2850'; tCtx.textAlign='center'; tCtx.textBaseline='middle';
+  tCtx.font='bold 30px Georgia, serif';
+  tCtx.fillText('Toilette', 128, py2+ph2/2);
+  // Icône homme/femme stylisée
+  tCtx.fillStyle='#4a68b0'; tCtx.font='48px Arial';
+  tCtx.fillText('🚻', 128, py2+ph2+55);
+  const toilTex = new THREE.CanvasTexture(tCanvas);
+
+  // Piliers bleutés
+  [-doorW/2-0.14, doorW/2+0.14].forEach(dx=>{
+    box(0.32, doorH+0.32, 0.40, mStoneBl, doorX+dx, (doorH+0.32)/2, doorZ+0.05);
+    box(0.36, 0.08, 0.44, new THREE.MeshLambertMaterial({color:0x8898c8}), doorX+dx, doorH*0.52, doorZ+0.05);
+  });
+  // Linteau bleuté
+  box(doorW+0.70, 0.30, 0.40, mStoneBl, doorX, doorH+0.15, doorZ+0.05);
+  // Panneau WC lumineux au-dessus
+  const wcCanvas = document.createElement('canvas');
+  wcCanvas.width=128; wcCanvas.height=64;
+  const wCtx=wcCanvas.getContext('2d');
+  wCtx.fillStyle='#0a1428'; wCtx.fillRect(0,0,128,64);
+  wCtx.strokeStyle='#4080ff'; wCtx.lineWidth=3; wCtx.strokeRect(3,3,122,58);
+  wCtx.fillStyle='#80b8ff'; wCtx.font='bold 32px Arial'; wCtx.textAlign='center'; wCtx.textBaseline='middle';
+  wCtx.fillText('WC', 64, 32);
+  const wcTex2=new THREE.CanvasTexture(wcCanvas);
+  const wcPan=new THREE.Mesh(new THREE.BoxGeometry(0.60,0.32,0.06),
+    new THREE.MeshLambertMaterial({map:wcTex2, emissive:0x080820, emissiveIntensity:0.3}));
+  wcPan.position.set(doorX, doorH+0.52, doorZ+0.10); scene.add(wcPan);
+
+  const leaves = [];
+  [-1, 1].forEach((side, idx)=>{
+    const pivot = new THREE.Group();
+    pivot.position.set(doorX + side*(doorW/2-0.05), 0, doorZ+0.06);
+    scene.add(pivot);
+    leaves.push({pivot, side});
+    const lo = -side*(doorW/4);
+    // Vantail avec texture complète (pas de panneaux déco par-dessus)
+    const leafMat = idx===1
+      ? new THREE.MeshLambertMaterial({map:toilTex})
+      : mDoorTB;
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(doorW/2-0.10, doorH-0.10, 0.10), leafMat);
+    leaf.position.set(lo, (doorH-0.10)/2, 0); leaf.castShadow=true; pivot.add(leaf);
+    // Poignée chromée
+    const hnd=new THREE.Mesh(new THREE.CylinderGeometry(0.028,0.028,0.26,8), new THREE.MeshLambertMaterial({color:0xccd4e8}));
+    hnd.rotation.z=Math.PI/2; hnd.position.set(lo*2*0.84, doorH*0.48, 0.12); pivot.add(hnd);
+    const knob=new THREE.Mesh(new THREE.SphereGeometry(0.040,8,6), new THREE.MeshLambertMaterial({color:0xe0e8f8}));
+    knob.position.set(lo*2*0.84, doorH*0.48, 0.13); pivot.add(knob);
+  });
+  return { leaves, pos: new THREE.Vector3(doorX, 1.7, doorZ+0.3), outDir:0 };
+}
+const sdToilette = makeToiletteDoor();
+
+// Porte Bibliothèque — 1er étage, mur Z=-27, X=0
+const sdBiblio = (()=>{
+  const doorW = 3.8, doorH = 4.5, doorZ = -27, doorX = 0, yOffset = 5;
+  const leaves = [];
+  [-1, 1].forEach((side, idx) => {
+    const pivot = new THREE.Group();
+    pivot.position.set(doorX + side*(doorW/2 - 0.05), yOffset, doorZ);
+    scene.add(pivot);
+    leaves.push({pivot, side});
+    const lo = -side*(doorW/4);
+    // Label "Bibliothèque" sur idx===0 (side=-1), face vers Z+ (côté couloir)
+    const leafMat = idx === 0
+      ? new THREE.MeshLambertMaterial({map: makeDoorLabelTex('Bibliothèque')})
+      : mWood;
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(doorW/2 - 0.1, doorH - 0.1, 0.10), leafMat);
+    leaf.position.set(lo, (doorH-0.1)/2, 0); leaf.castShadow = true; pivot.add(leaf);
+    [0.75, 0.42, 0.14].forEach((yr, pi) => {
+      const ph = [1.0, 1.1, 0.75][pi];
+      const p = new THREE.Mesh(new THREE.BoxGeometry(doorW/2-0.4, ph, 0.07), new THREE.MeshLambertMaterial({color:0x4a3018}));
+      p.position.set(lo, doorH*yr, 0.06); pivot.add(p);
+    });
+    const gl = new THREE.Mesh(new THREE.BoxGeometry(doorW/2-0.5, 0.9, 0.05), mWinGlass);
+    gl.position.set(lo, doorH-0.6, 0.05); pivot.add(gl);
+    const hnd = new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.035,0.28,8), new THREE.MeshLambertMaterial({color:0xc8a030}));
+    hnd.rotation.z = Math.PI/2; hnd.position.set(lo*2*0.9, doorH*0.5, 0.13); pivot.add(hnd);
+  });
+  // pos côté couloir (Z > -27) pour que le joueur la détecte en approchant
+  return { leaves, pos: new THREE.Vector3(doorX, yOffset+1.7, doorZ+1.0), outDir:0 };
+})();
+
+// Données des portes (porte principale supprimée)
+// floor: 0 = rez-de-chaussée, 1 = 1er étage
+const DOORS = [
+  {
+    id:'mainPorte',
+    pos: new THREE.Vector3(0, 1.7, -19.5),
+    leaves: window._mainPorteData.leaves,
+    animAngle: 0, targetAngle: 0, open: false,
+    floor: 0,
+  },
+  {
+    id:'left',
+    pos: sdL.pos, leaves: sdL.leaves, outDir: sdL.outDir,
+    animAngle: 0, targetAngle: 0, open: false,
+    floor: 0,
+  },
+  {
+    id:'right',
+    pos: sdR.pos, leaves: sdR.leaves, outDir: sdR.outDir,
+    animAngle: 0, targetAngle: 0, open: false,
+    floor: 0,
+  },
+  {
+    id:'back',
+    pos: sdBack.pos, leaves: sdBack.leaves, outDir: 0,
+    animAngle: 0, targetAngle: 0, open: false,
+    isBack: true,
+    floor: 0,
+  },
+  {
+    id:'endLeft',
+    pos: sdEndL.pos, leaves: sdEndL.leaves, outDir: sdEndL.outDir,
+    animAngle: 0, targetAngle: 0, open: false,
+    floor: 0,
+  },
+  {
+    id:'endRight',
+    pos: sdEndR.pos, leaves: sdEndR.leaves, outDir: sdEndR.outDir,
+    animAngle: 0, targetAngle: 0, open: false,
+    floor: 0,
+  },
+  {
+    id:'endA',
+    pos: sdEndA.pos, leaves: sdEndA.leaves, outDir: sdEndA.outDir,
+    animAngle: 0, targetAngle: 0, open: false,
+    floor: 1,
+  },
+  {
+    id:'endB',
+    pos: sdEndB.pos, leaves: sdEndB.leaves, outDir: sdEndB.outDir,
+    animAngle: 0, targetAngle: 0, open: false,
+    floor: 1,
+  },
+  {
+    id:'biblio',
+    pos: sdBiblio.pos, leaves: sdBiblio.leaves, outDir: 0,
+    animAngle: 0, targetAngle: 0, open: false,
+    isBack: true,
+    floor: 1,
+  },
+  {
+    id:'mystery',
+    pos: sdMystery.pos, leaves: sdMystery.leaves, outDir: 0,
+    animAngle: 0, targetAngle: 0, open: false,
+    isMystery: true,
+    floor: 0,
+  },
+  {
+    id:'sortie',
+    pos: sdSortie.pos, leaves: sdSortie.leaves, outDir: 0,
+    animAngle: 0, targetAngle: 0, open: false,
+    floor: 0,
+  },
+  {
+    id:'toilette',
+    pos: sdToilette.pos, leaves: sdToilette.leaves, outDir: 0,
+    animAngle: 0, targetAngle: 0, open: false,
+    floor: 0,
+  },
+];
+
+// ─── FONCTION TEXTURE NOM SUR VANTAIL ────────────────────────────────────
+// Créer des mesh de surbrillance pour chaque vantail
+DOORS.forEach(door=>{
+  door.leaves.forEach(lf=>{
+    if(!lf.pivot.children[0]) return; // pivot vide (ex: dummy vantail)
+    // Clone de la géométrie légèrement agrandi
+    const glowMesh = lf.pivot.children[0].clone();
+    glowMesh.material = mGlow;
+    glowMesh.scale.set(1.05,1.02,2.5);
+    glowMesh.visible = false;
+    lf.pivot.add(glowMesh);
+    lf.glowMesh = glowMesh;
+  });
+  door.highlighted = false;
+});
+
+// Bouton main — à droite, semi-transparent, juste l'emoji
+const handBtn = document.createElement('button');
+handBtn.id='handBtn';
+handBtn.innerHTML='🖐️';
+handBtn.style.cssText=`
+  display:none; position:fixed; bottom:90px; right:20px;
+  background:rgba(255,255,255,0.25); border:2px solid rgba(255,255,255,0.4);
+  border-radius:50%; width:60px; height:60px;
+  font-size:28px; cursor:pointer; z-index:20;
+  backdrop-filter:blur(4px); touch-action:none;
+`;
+document.body.appendChild(handBtn);
+
+let activeDoor = null;
+
+handBtn.addEventListener('click', ()=>{
+  if(!activeDoor) return;
+  activeDoor.open = !activeDoor.open;
+  activeDoor.targetAngle = activeDoor.open ? 1 : 0;
+  handBtn.innerHTML = activeDoor.open ? '🚪' : '🖐️';
+});
+handBtn.addEventListener('touchstart', e=>{ e.preventDefault(); handBtn.click(); },{passive:false});
+
+
+// ══════════════════════════════════════════════════════════════
+// ─── SYSTÈME DE DIALOGUE avec le jardinier ────────────────────
+// ══════════════════════════════════════════════════════════════
+
+// CSS bulle de pensée
+const bubbleStyle = document.createElement('style');
+bubbleStyle.textContent = `
+  #dialogueBox {
+    display:none; position:fixed; bottom:110px; left:50%; transform:translateX(-50%);
+    width:min(440px,88vw); background:#fffdf4;
+    border:2.5px solid #c8a830; border-radius:28px;
+    padding:18px 22px 14px; z-index:30;
+    font-family:Georgia,serif; color:#2a1a08;
+    box-shadow:0 6px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,220,0.8);
+  }
+  #dialogueBox::before {
+    content:''; position:absolute; bottom:-22px; left:56px;
+    width:0; height:0;
+    border-left:15px solid transparent; border-right:10px solid transparent;
+    border-top:22px solid #c8a830;
+  }
+  #dialogueBox::after {
+    content:''; position:absolute; bottom:-18px; left:58px;
+    width:0; height:0;
+    border-left:13px solid transparent; border-right:8px solid transparent;
+    border-top:18px solid #fffdf4;
+  }
+  #bubbleDot1,#bubbleDot2,#bubbleDot3 {
+    position:fixed; border-radius:50%; background:#fffdf4;
+    border:2px solid #c8a830; z-index:30; pointer-events:none;
+  }
+  .dlg-btn {
+    background:linear-gradient(135deg,#f5e8c0,#ede0a8);
+    border:1.5px solid #b8920a; border-radius:20px;
+    padding:7px 14px; color:#2a1a08;
+    font-family:Georgia,serif; font-size:12px; cursor:pointer;
+    box-shadow:0 2px 6px rgba(0,0,0,0.15); transition:0.15s;
+  }
+  .dlg-btn:hover { background:linear-gradient(135deg,#ffe090,#d4a800); transform:translateY(-1px); }
+`;
+document.head.appendChild(bubbleStyle);
+
+const dialogueBox = document.createElement('div');
+dialogueBox.id='dialogueBox';
+document.body.appendChild(dialogueBox);
+
+// Petits cercles de queue de bulle
+const dot1=document.createElement('div'); dot1.id='bubbleDot1';
+const dot2=document.createElement('div'); dot2.id='bubbleDot2';
+const dot3=document.createElement('div'); dot3.id='bubbleDot3';
+[dot1,dot2,dot3].forEach(d=>{d.style.display='none'; document.body.appendChild(d);});
+function showBubbleDots(show){
+  if(!show){[dot1,dot2,dot3].forEach(d=>d.style.display='none'); return;}
+  const box=dialogueBox.getBoundingClientRect();
+  const bx=box.left+68, by=box.bottom;
+  [[dot1,10,6,0],[dot2,7,14,5],[dot3,5,21,9]].forEach(([d,sz,oy,ox])=>{
+    d.style.display='block';
+    d.style.width=sz+'px'; d.style.height=sz+'px';
+    d.style.left=(bx+ox-sz/2)+'px'; d.style.top=(by+oy)+'px';
+  });
+}
+
+// Bulle "Parler" au-dessus du jardinier (visible quand proche)
+const talkBubble = document.createElement('div');
+talkBubble.style.cssText=`
+  display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+  background:rgba(0,0,0,0.55); border:1px solid #aaa; border-radius:20px;
+  padding:6px 14px; color:#fff; font-family:Georgia,serif; font-size:13px;
+  pointer-events:none; z-index:25;
+`;
+talkBubble.textContent='[E] Parler au jardinier';
+document.body.appendChild(talkBubble);
+
+let inDialogue = false;
+let nearGardener = false;
+let dialoguePhase = 0; // 0=greeting, 1=menu, 2=key_ask, 3=key_answer, 4=bye
+
+const DIALOGUE_GREETINGS = [
+  "Bonjour ! Je m'appelle Marcel, je suis le jardinier du lycée. Vous avez besoin de quelque chose ?",
+  "Ah, bonjour ! Belle journée pour jardiner, non ? Je m'occupe de la cour depuis 12 ans !",
+  "Bonjour bonjour ! J'étais justement en train d'arroser les fleurs. Que puis-je pour vous ?"
+];
+let greetIdx = 0;
+
+function showDialogue(html, choices){
+  dialogueBox.style.display='block';
+  inDialogue=true;
+  let choiceHTML='';
+  if(choices){
+    choiceHTML='<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;">';
+    choices.forEach((c,i)=>{
+      choiceHTML+=`<button class="dlg-btn" onclick="dialogueChoice(${i})">${c.label}</button>`;
+    });
+    choiceHTML+='</div>';
+    window._dialogueChoices=choices;
+  }
+  dialogueBox.innerHTML=`
+    <div style="display:flex;gap:10px;align-items:flex-start;">
+      <div style="font-size:24px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.2))">🧓</div>
+      <div style="flex:1;">
+        <div style="font-size:10px;color:#9a7010;font-style:italic;margin-bottom:5px;letter-spacing:0.4px;">Marcel — Jardinier</div>
+        <div style="font-size:13px;line-height:1.65;color:#1a1008;">${html}</div>
+        ${choiceHTML}
+      </div>
+    </div>
+    <div style="text-align:right;margin-top:8px;">
+      <span style="font-size:10px;color:#bba050;letter-spacing:0.3px;">[Echap] Fermer</span>
+    </div>
+  `;
+  // Repositionner les cercles après que la bulle est rendue
+  requestAnimationFrame(()=>showBubbleDots(true));
+}
+
+function closeDialogue(){
+  dialogueBox.style.display='none';
+  showBubbleDots(false);
+  inDialogue=false;
+  dialoguePhase=0;
+}
+
+window.dialogueChoice = function(i){
+  const choices = window._dialogueChoices;
+  if(!choices || !choices[i]) return;
+  choices[i].action();
+};
+
+function askForGate(){
+  if(gateOpen){
+    showDialogue('Le portail est déjà ouvert ! Vous pouvez passer librement.', [
+      { label:'Merci !', action:()=>closeDialogue() }
+    ]);
+    return;
+  }
+  showDialogue('Vous souhaitez que j\'ouvre le portail ? J\'ai le trousseau de clés, je vais m\'en occuper.', [
+    { label:'✅ Oui, merci Marcel !', action:()=>{
+      showDialogue('Bien sûr ! Je vais déverrouiller le cadenas tout de suite. Attendez un instant…');
+      setTimeout(()=>{
+        closeDialogue();
+        gardenerGateAction = true;
+        gardenerState = 'walking';
+      }, 1400);
+    }},
+    { label:'❌ Non, finalement non', action:()=>startDialogue() }
+  ]);
+}
+
+function askCloseGate(){
+  if(!gateOpen){
+    showDialogue('Le portail est déjà fermé et bien cadenassé, pas d\'inquiétude !', [
+      { label:'D\'accord, merci.', action:()=>closeDialogue() }
+    ]);
+    return;
+  }
+  showDialogue('Vous voulez que je referme le portail ? Je vais remettre le cadenas doré.', [
+    { label:'✅ Oui, fermez-le !', action:()=>{
+      showDialogue('Entendu ! Je referme et je cadenasse. Un instant…');
+      setTimeout(()=>{
+        closeDialogue();
+        gardenerCloseAction = true;
+        gardenerState = 'walking';
+      }, 1400);
+    }},
+    { label:'❌ Non, laissez ouvert', action:()=>startDialogue() }
+  ]);
+}
+
+function startDialogue(){
+  dialoguePhase=1;
+  const greeting = DIALOGUE_GREETINGS[greetIdx % DIALOGUE_GREETINGS.length];
+  greetIdx++;
+  showDialogue(greeting, [
+    { label:'🔑 Ouvrir le portail', action:()=>askForGate() },
+    { label:'🔒 Fermer le portail', action:()=>askCloseGate() },
+    { label:'🌸 Comment va le jardin ?', action:()=>{
+      const msgs = [
+        'Les rosiers donnent bien cette année ! J\'ai planté de nouvelles fleurs la semaine dernière.',
+        'J\'ai eu du mal avec les mauvaises herbes près du bras gauche, mais ça va mieux.',
+        'Les arbres ont besoin d\'être taillés, mais sinon tout est beau !',
+        'Ce matin j\'ai trouvé un escargot sous le banc. Je l\'ai remis dans la pelouse.'
+      ];
+      showDialogue(msgs[Math.floor(Math.random()*msgs.length)], [
+        { label:'↩ Retour', action:()=>startDialogue() },
+        { label:'Au revoir', action:()=>closeDialogue() }
+      ]);
+    }},
+    { label:'Au revoir', action:()=>{
+      const byes=['Bonne journée !','À tout à l\'heure !','N\'hésitez pas si vous avez besoin !'];
+      showDialogue(byes[Math.floor(Math.random()*byes.length)]);
+      setTimeout(closeDialogue, 1800);
+    }}
+  ]);
+}
+
+// Touche E pour parler
+document.addEventListener('keydown', e=>{
+  if(e.key.toLowerCase()==='e'){
+    if(inDialogue){ closeDialogue(); return; }
+    if(nearGardener) startDialogue();
+  }
+  if(e.key==='Escape' && inDialogue) closeDialogue();
+});
+
+let camYaw=Math.PI, camPitch=0.05;
+camera.position.set(0,1.7,16);
+const keys={};
+let jLx=0,jLy=0,jRx=0,jRy=0;
+
+document.addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true; if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(e.key.toLowerCase())) e.preventDefault();});
+document.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
+
+let mdown=false,lmx=0,lmy=0;
+canvas.addEventListener('mousedown',e=>{mdown=true;lmx=e.clientX;lmy=e.clientY;canvas.style.cursor='grabbing';});
+document.addEventListener('mouseup',()=>{mdown=false;canvas.style.cursor='crosshair';});
+document.addEventListener('mousemove',e=>{
+  if(!mdown)return;
+  camYaw-=(e.clientX-lmx)*0.004;
+  camPitch-=(e.clientY-lmy)*0.003;
+  camPitch=Math.max(-0.6,Math.min(0.7,camPitch));
+  lmx=e.clientX;lmy=e.clientY;
+});
+canvas.addEventListener('touchstart',e=>{mdown=true;lmx=e.touches[0].clientX;lmy=e.touches[0].clientY;},{passive:true});
+canvas.addEventListener('touchmove',e=>{
+  if(!mdown)return;
+  camYaw-=(e.touches[0].clientX-lmx)*0.004;
+  camPitch-=(e.touches[0].clientY-lmy)*0.003;
+  camPitch=Math.max(-0.6,Math.min(0.7,camPitch));
+  lmx=e.touches[0].clientX;lmy=e.touches[0].clientY;
+},{passive:true});
+
+function setupJoy(id,onMove){
+  const cv=document.getElementById(id);
+  let active=false,ox=0,oy=0;
+  function s(x,y){active=true;ox=x;oy=y;}
+  function mv(x,y){
+    if(!active)return;
+    let dx=(x-ox)/45,dy=(y-oy)/22;
+    const mg=Math.sqrt(dx*dx+dy*dy);
+    if(mg>1){dx/=mg;dy/=mg;}
+    onMove(dx,dy);
+  }
+  function e(){active=false;onMove(0,0);}
+  cv.addEventListener('mousedown',ev=>{const r=cv.getBoundingClientRect();s(ev.clientX-r.left,ev.clientY-r.top);});
+  document.addEventListener('mousemove',ev=>{if(active){const r=cv.getBoundingClientRect();mv(ev.clientX-r.left,ev.clientY-r.top);}});
+  document.addEventListener('mouseup',e);
+  cv.addEventListener('touchstart',ev=>{ev.preventDefault();const t=ev.touches[0];const r=cv.getBoundingClientRect();s(t.clientX-r.left,t.clientY-r.top);},{passive:false});
+  cv.addEventListener('touchmove',ev=>{ev.preventDefault();const t=ev.touches[0];const r=cv.getBoundingClientRect();mv(t.clientX-r.left,t.clientY-r.top);},{passive:false});
+  cv.addEventListener('touchend',e);
+}
+setupJoy('jL',(dx,dy)=>{jLx=dx;jLy=dy;});
+setupJoy('jR',(dx,dy)=>{jRx=dx;jRy=dy;});
+
+function drawJoy(id,dx,dy){
+  const cv=document.getElementById(id);
+  const x2=cv.getContext('2d');
+  const W=120,H=60;
+  x2.clearRect(0,0,W,H);
+  x2.fillStyle='#1e1e1e';x2.beginPath();x2.ellipse(W/2,H/2,56,26,0,0,Math.PI*2);x2.fill();
+  x2.strokeStyle='#444';x2.lineWidth=1.5;x2.beginPath();x2.ellipse(W/2,H/2,56,26,0,0,Math.PI*2);x2.stroke();
+  const nx=W/2+dx*38,ny=H/2+dy*16;
+  const g2=x2.createRadialGradient(nx-2,ny-2,1,nx,ny,13);
+  g2.addColorStop(0,'#888');g2.addColorStop(1,'#2a2a2a');
+  x2.fillStyle=g2;x2.beginPath();x2.ellipse(nx,ny,15,10,0,0,Math.PI*2);x2.fill();
+  x2.strokeStyle='#111';x2.lineWidth=1;x2.beginPath();x2.ellipse(nx,ny,15,10,0,0,Math.PI*2);x2.stroke();
+}
+
+// ═══════════════════════════════════════════════════════
+// ─── COULOIR EN U DERRIÈRE LES 3 PORTES ───────────────
+// ═══════════════════════════════════════════════════════
+// Mur arrière Z=-27 + bras X=+-27, fermés sur le mur du portail (Z=+18)
+{
+  const mS = mStone;
+  const wallH = 5, wallT = 0.4;
+  const zCenter = (-27 + 18) / 2; // -4.5
+  const zLen = 45;
+
+  // Mur arrière Z=-27 : avec trou pour grande porte centrale (largeur 4.4, hauteur 4.6)
+  // Porte centrale : X de -2.2 à +2.2
+  // Côté gauche : trou de X=-25.5 à X=-13.5 (face à la chambre côté gauche)
+  box(1.7,  wallH, wallT, mS, (-27.2 + -25.5)/2, wallH/2, -27); // bout extérieur gauche
+  // trou gauche : X=-25.5 à -13.5 → maintenant fermé sauf autour porte mystery
+  // Segments de mur de chaque côté de la porte (X=-22.35 ± 1.7)
+  box(1.45, wallH, wallT, mS, -24.775, wallH/2, -27); // X=-25.5 à -24.05, largeur=1.45, centre=-24.775
+  // box(7.15, wallH, wallT, mS, -17.175, wallH/2, -27); // SUPPRIMÉ — remplacé par ouverture à X=-17.91
+  // Bandeau au-dessus de la porte mystery (doorH=4.2, wallH=5)
+  box(3.4, wallH - 4.2, wallT, mS, -22.35, 4.2 + (wallH-4.2)/2, -27);
+  // ─── OUVERTURE COULOIR ↔ couloir passage à X=-17.91 (largeur 3.0, entre surveillant et bureau principal) ───
+  box(1.24, wallH, wallT, mS, -20.03, wallH/2, -27); // gauche (X=-20.65 à -19.41)
+  box(2.91, wallH, wallT, mS, -14.955, wallH/2, -27); // droite (X=-16.41 à -13.5)
+  box(3.2, wallH - 4.2, wallT, mS, -17.91, 4.2 + (wallH-4.2)/2, -27); // bandeau au-dessus
+  // Segment vers centre (X=-13.5 à -2.2) — plein, pas d'ouverture
+  box(11.3, wallH, wallT, mS, (-13.5 + -2.2)/2, wallH/2, -27); // segment vers centre gauche
+  // Côté droit : trou de X=+13.5 à X=+25.5 (face à la chambre côté droit)
+  box(11.3, wallH, wallT, mS, (2.2 + 13.5)/2,    wallH/2, -27); // segment vers centre droit
+  // trou droit : X=+13.5 à +25.5 → 2 portes : Sortie (X≈17) et Toilette (X≈22.5)
+  // Porte Sortie centrée X=17.2, largeur 2.2
+  // Porte Toilette centrée X=22.5, largeur 2.2
+  const corrDW = 2.2, corrDH = 4.2;
+  const corrD1X = 17.2, corrD2X = 22.5;
+  // Segments mur entre et autour des portes
+  // 13.5 → 16.1 (mur plein)
+  box(2.6, wallH, wallT, mS, (13.5+16.1)/2, wallH/2, -27);
+  // 18.3 → 21.4 (entre les deux portes)
+  box(3.1, wallH, wallT, mS, (18.3+21.4)/2, wallH/2, -27);
+  // 23.6 → 25.5 (après porte toilette)
+  box(1.9, wallH, wallT, mS, (23.6+25.5)/2, wallH/2, -27);
+  // Bandeaux au-dessus des portes
+  box(corrDW+0.2, wallH - corrDH, wallT, mS, corrD1X, corrDH + (wallH-corrDH)/2, -27);
+  box(corrDW+0.2, wallH - corrDH, wallT, mS, corrD2X, corrDH + (wallH-corrDH)/2, -27);
+  box(1.7,  wallH, wallT, mS, (25.5 + 27.2)/2,   wallH/2, -27); // bout extérieur droit
+  // Bandeau au-dessus de la porte centrale
+  box(4.8, wallH - 4.6, wallT, mS, 0, 4.6 + (wallH-4.6)/2, -27);
+  // Semelle sous la porte
+  box(4.8, 0.15, wallT+0.2, new THREE.MeshLambertMaterial({color:0xd0c8b0}), 0, 0.075, -27);
+
+  // Bras gauche extérieur : X=-27, de Z=-27 à Z=+18
+  // Trou pour porte latérale gauche PRÈS DU PORTAIL : Z de +13.6 à +17.6 (largeur=4)
+  // Segment fond → portail (sans trou) : Z=-27 à Z=+13.6 → longueur=40.6
+  box(wallT, wallH, 40.6, mS, -27, wallH/2, (-27+13.6)/2);
+  // Bandeau au-dessus du trou
+  box(wallT, wallH - 4.5, 4.2, mS, -27, 4.5 + (wallH-4.5)/2, 15.8);
+  // Segment après trou → fin (Z=+17.6 à Z=+18) : longueur=0.4
+  box(wallT, wallH, 0.4, mS, -27, wallH/2, 17.8);
+  // Semelle sous porte latérale gauche
+  box(wallT+0.2, 0.15, 4.2, new THREE.MeshLambertMaterial({color:0xd0c8b0}), -27, 0.075, 15.8);
+
+  // Bras droit extérieur : X=+27 — symétrique
+  box(wallT, wallH, 40.6, mS, 27, wallH/2, (-27+13.6)/2);
+  box(wallT, wallH - 4.5, 4.2, mS, 27, 4.5 + (wallH-4.5)/2, 15.8);
+  box(wallT, wallH, 0.4, mS, 27, wallH/2, 17.8);
+  box(wallT+0.2, 0.15, 4.2, new THREE.MeshLambertMaterial({color:0xd0c8b0}), 27, 0.075, 15.8);
+
+  // Fermeture gauche sur le mur du portail : Z=+18, X=-27 a X=-24
+  box(3.4, wallH, wallT, mS, -25.7, wallH/2, 18);
+
+  // Fermeture droite sur le mur du portail : Z=+18, X=+24 a X=+27
+  box(3.4, wallH, wallT, mS, 25.7, wallH/2, 18);
+}
+
+// ═══════════════════════════════════════════════════════
+// ─── DEUXIÈME COULOIR (3× plus large que le premier) ──
+// Premier couloir : largeur ≈ 3 (X de 24 à 27, ou -24 à -27)
+// Deuxième couloir : largeur = 9, donc murs extérieurs à X=±36
+// Se referme aussi sur le mur du grand portail Z=+18
+// ═══════════════════════════════════════════════════════
+{
+  const mS = mStone;
+  const wallH = 5, wallT = 0.4;
+  const c2Width = 9; // 3× le premier couloir
+  const c2OutX = 36; // murs extérieurs
+
+  // Mur arrière gauche Z=-27 : X=-27 à X=-36
+  box(c2Width, wallH, wallT, mS, -(27 + c2Width/2), wallH/2, -27);
+  // Mur arrière droit Z=-27 : X=+27 à X=+36 — avec trou pour porte toilette (X=22.5, larg 2.2)
+  // La porte toilette est à X=22.5, dans le segment X=13.5→25.5 (mur principal)
+  // Le mur du 2e couloir X=27→36 reste plein
+  box(c2Width, wallH, wallT, mS,  (27 + c2Width/2), wallH/2, -27);
+
+  // Bras gauche extérieur : X=-36, de Z=-27 à Z=+18 (longueur=45) — MUR PLEIN, pas de trou
+  box(wallT, wallH, 45, mS, -c2OutX, wallH/2, (-27+18)/2);
+
+  // Bras droit extérieur : X=+36 — symétrique, MUR PLEIN
+  box(wallT, wallH, 45, mS,  c2OutX, wallH/2, (-27+18)/2);
+
+  // Fermeture gauche sur le mur du portail : Z=+18, X=-36 à X=-27 — MUR PLEIN
+  box(9, wallH, wallT, mS, -(27 + 4.5), wallH/2, 18);
+
+  // Fermeture droite sur le mur du portail : Z=+18, X=+27 à X=+36 — MUR PLEIN
+  box(9, wallH, wallT, mS,  (27 + 4.5), wallH/2, 18);
+
+  // Sol du 2e couloir gauche
+  {
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(c2Width, 45), mPave);
+    pl.rotation.x = -Math.PI/2; pl.position.set(-(27+c2Width/2), 0.01, (-27+18)/2); pl.receiveShadow=true; scene.add(pl);
+  }
+  // Sol du 2e couloir droit
+  {
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(c2Width, 45), mPave);
+    pl.rotation.x = -Math.PI/2; pl.position.set( (27+c2Width/2), 0.01, (-27+18)/2); pl.receiveShadow=true; scene.add(pl);
+  }
+
+  // Les murs X=±36 sont pleins — les chambres n'ont qu'une seule entrée (mur Z=18)
+}
+
+// ─── TOIT PLAT (sur le RDC, premier étage supprimé) ─────────────────────
+{
+  const mRoofTop = new THREE.MeshLambertMaterial({map:roofTex, color:0x6a7880});
+  const roofY = 5.05;
+
+  // Toit couloir gauche SUPPRIMÉ — remplacé par le sol de la Classe 5e B au 1er étage
+  // Toit couloir droit SUPPRIMÉ — remplacé par le sol de la Classe 5e A au 1er étage
+  // Toit bande couloir en U gauche : X=-24→-27, Z=-27→18
+  { const pl = new THREE.Mesh(new THREE.PlaneGeometry(3, 45), mRoofTop);
+    pl.rotation.x = -Math.PI/2; pl.position.set(-25.5, roofY, (-27+18)/2); scene.add(pl); }
+  // Toit bande couloir en U droit : X=+24→+27, Z=-27→18
+  { const pl = new THREE.Mesh(new THREE.PlaneGeometry(3, 45), mRoofTop);
+    pl.rotation.x = -Math.PI/2; pl.position.set(25.5, roofY, (-27+18)/2); scene.add(pl); }
+  // Toit façade arrière : X=-24→+24, Z=-19.5→-27
+  { const pl = new THREE.Mesh(new THREE.PlaneGeometry(48, 7.5), mRoofTop);
+    pl.rotation.x = -Math.PI/2; pl.position.set(0, roofY, (-19.5-27)/2); scene.add(pl); }
+  // Toit chambres arrière SUPPRIMÉ — remplacé par le sol de la Bibliothèque au 1er étage
+  // Zone cage escalier X=-20.21→-12.23 : PAS de toit RDC (ouverture vers 1er étage)
+
+  // ── PLAFONDS INTÉRIEURS RDC (sous les salles du 1er étage) ──
+  const mCeilRDC = new THREE.MeshLambertMaterial({color:0xe8e0cc});
+  // Plafond bande couloir en U gauche : X=-24→-27, Z=-27→18
+  { const pl = new THREE.Mesh(new THREE.PlaneGeometry(3, 45), mCeilRDC);
+    pl.rotation.x = Math.PI/2; pl.position.set(-25.5, roofY, (-27+18)/2); scene.add(pl); }
+  // Plafond bande couloir en U droit : X=+24→+27, Z=-27→18
+  { const pl = new THREE.Mesh(new THREE.PlaneGeometry(3, 45), mCeilRDC);
+    pl.rotation.x = Math.PI/2; pl.position.set(25.5, roofY, (-27+18)/2); scene.add(pl); }
+  // Plafond façade arrière : X=-24→+24, Z=-19.5→-27
+  { const pl = new THREE.Mesh(new THREE.PlaneGeometry(48, 7.5), mCeilRDC);
+    pl.rotation.x = Math.PI/2; pl.position.set(0, roofY, (-19.5-27)/2); scene.add(pl); }
+  // Plafond sous la bibliothèque (zone arrière Z=-27→-35.5), sauf trou cage escalier
+  // Partie gauche : X=-36 → -20.21
+  { const w = 36-20.21; const pl = new THREE.Mesh(new THREE.PlaneGeometry(w, 8.5), mCeilRDC);
+    pl.rotation.x = Math.PI/2; pl.position.set(-36+w/2, roofY, (-27-35.5)/2); scene.add(pl); }
+  // Partie droite : X=-12.23 → +36
+  { const w = 36-12.23; const pl = new THREE.Mesh(new THREE.PlaneGeometry(w, 8.5), mCeilRDC);
+    pl.rotation.x = Math.PI/2; pl.position.set(-12.23+w/2, roofY, (-27-35.5)/2); scene.add(pl); }
+  // Corniche façade Z=18
+  box(9, 0.30, 0.70, mStone, -(27+4.5), roofY + 0.15, 18.35);
+  box(9, 0.30, 0.70, mStone,  (27+4.5), roofY + 0.15, 18.35);
+  box(0.70, 0.30, 46, mStone, -36.35, roofY + 0.15, (-27+18)/2);
+  box(0.70, 0.30, 46, mStone,  36.35, roofY + 0.15, (-27+18)/2);
+}
+
+// ═══════════════════════════════════════════════════════
+// ─── CLASSE 5e A — 1er ÉTAGE (au-dessus du couloir droit X=27→36) ──────────
+// Même empreinte que le couloir droit : X=27→36, Z=-27→18, Y=5→10
+// ═══════════════════════════════════════════════════════
+{
+  const rXmin = 27, rXmax = 36;
+  const rZfront = -27, rZback = 18;
+  const rW  = rXmax - rXmin;          // 9
+  const rD  = Math.abs(rZback - rZfront); // 45
+  const rCX = (rXmin + rXmax) / 2;    // 31.5
+  const rCZ = (rZfront + rZback) / 2; // -4.5
+  const rH  = 5;   // hauteur du rez-de-chaussée = base du 1er étage
+  const rFloorY = rH;                 // sol à Y=5
+  const rCeilY  = rH + rH;           // plafond à Y=10
+  const wallT = 0.4;
+
+  const mRoomA   = new THREE.MeshLambertMaterial({color:0xddd4b8, map:stoneTex});
+  const mFloorA  = new THREE.MeshLambertMaterial({color:0xc8b898, map:paveTex});
+  const mCeilA   = new THREE.MeshLambertMaterial({color:0xe8e0cc});
+
+  // Sol (= ancien toit du couloir droit)
+  {
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(rW, rD), mFloorA);
+    pl.rotation.x = -Math.PI/2; pl.position.set(rCX, rFloorY + 0.01, rCZ);
+    pl.receiveShadow = true; scene.add(pl);
+  }
+
+  // Plafond
+  {
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(rW, rD), mCeilA);
+    pl.rotation.x = Math.PI/2; pl.position.set(rCX, rCeilY, rCZ);
+    scene.add(pl);
+  }
+
+  // Toit extérieur sur le plafond
+  {
+    const mRoofTop2 = new THREE.MeshLambertMaterial({map:roofTex, color:0x6a7880});
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(rW + 0.8, rD + 0.8), mRoofTop2);
+    pl.rotation.x = -Math.PI/2; pl.position.set(rCX, rCeilY + 0.06, rCZ);
+    scene.add(pl);
+  }
+
+  // Mur intérieur (X = rXmin = 27) — avec trou pour porte à Z=15.8
+  {
+    const doorW = 3.8, doorH = 4.5, doorZ = 15.8;
+    const zSegments = [
+      [rZfront, doorZ - doorW/2],
+      [doorZ + doorW/2, rZback]
+    ];
+    zSegments.forEach(([z1, z2]) => {
+      const len = z2 - z1;
+      if(len > 0.01) box(wallT, rH, len, mRoomA, rXmin, rFloorY + rH/2, (z1+z2)/2);
+    });
+    // Bandeau au-dessus de la porte
+    box(wallT, rH - doorH, doorW + 0.4, mRoomA, rXmin, rFloorY + doorH + (rH - doorH)/2, doorZ);
+  }
+
+  // Mur extérieur (X = rXmax = 36) — plein
+  box(wallT, rH, rD, mRoomA, rXmax, rFloorY + rH/2, rCZ);
+
+  // Mur arrière (Z = rZfront = -27) — plein
+  box(rW + wallT*2, rH, wallT, mRoomA, rCX, rFloorY + rH/2, rZfront);
+
+  // Mur avant (Z = rZback = +18) — plein
+  box(rW + wallT*2, rH, wallT, mRoomA, rCX, rFloorY + rH/2, rZback);
+
+  // Lumières dans la salle
+  [-10, rCZ, 10].forEach(lz => {
+    const roomLight = new THREE.PointLight(0xffe8c0, 0.5, 14);
+    roomLight.position.set(rCX, rCeilY - 0.5, lz);
+    scene.add(roomLight);
+    const bulbMat3 = new THREE.MeshBasicMaterial({color: 0xffe8a0});
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), bulbMat3);
+    bulb.position.set(rCX, rCeilY - 0.4, lz);
+    scene.add(bulb);
+    const wireMat3 = new THREE.MeshLambertMaterial({color:0x222222});
+    const wire = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.5, 4), wireMat3);
+    wire.position.set(rCX, rCeilY - 0.15, lz);
+    scene.add(wire);
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+// ─── CLASSE 5e B — 1er ÉTAGE (au-dessus du couloir gauche X=-36→-27) ──────────
+// Symétrique de la Classe 5e A, même empreinte : X=-36→-27, Z=-27→18, Y=5→10
+// ═══════════════════════════════════════════════════════
+{
+  const rXmin = -36, rXmax = -27;
+  const rZfront = -27, rZback = 18;
+  const rW  = Math.abs(rXmax - rXmin);     // 9
+  const rD  = Math.abs(rZback - rZfront);  // 45
+  const rCX = (rXmin + rXmax) / 2;         // -31.5
+  const rCZ = (rZfront + rZback) / 2;      // -4.5
+  const rH  = 5;
+  const rFloorY = rH;                       // sol à Y=5
+  const rCeilY  = rH + rH;                 // plafond à Y=10
+  const wallT = 0.4;
+
+  const mRoomB  = new THREE.MeshLambertMaterial({color:0xddd4b8, map:stoneTex});
+  const mFloorB = new THREE.MeshLambertMaterial({color:0xc8b898, map:paveTex});
+  const mCeilB  = new THREE.MeshLambertMaterial({color:0xe8e0cc});
+
+  // Sol (= ancien toit du couloir gauche)
+  {
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(rW, rD), mFloorB);
+    pl.rotation.x = -Math.PI/2; pl.position.set(rCX, rFloorY + 0.01, rCZ);
+    pl.receiveShadow = true; scene.add(pl);
+  }
+
+  // Plafond
+  {
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(rW, rD), mCeilB);
+    pl.rotation.x = Math.PI/2; pl.position.set(rCX, rCeilY, rCZ);
+    scene.add(pl);
+  }
+
+  // Toit extérieur sur le plafond
+  {
+    const mRoofTop2 = new THREE.MeshLambertMaterial({map:roofTex, color:0x6a7880});
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(rW + 0.8, rD + 0.8), mRoofTop2);
+    pl.rotation.x = -Math.PI/2; pl.position.set(rCX, rCeilY + 0.06, rCZ);
+    scene.add(pl);
+  }
+
+  // Mur intérieur (X = rXmax = -27) — avec trou pour porte à Z=15.8
+  {
+    const doorW = 3.8, doorH = 4.5, doorZ = 15.8;
+    const zSegments = [
+      [rZfront, doorZ - doorW/2],
+      [doorZ + doorW/2, rZback]
+    ];
+    zSegments.forEach(([z1, z2]) => {
+      const len = z2 - z1;
+      if(len > 0.01) box(wallT, rH, len, mRoomB, rXmax, rFloorY + rH/2, (z1+z2)/2);
+    });
+    // Bandeau au-dessus de la porte
+    box(wallT, rH - doorH, doorW + 0.4, mRoomB, rXmax, rFloorY + doorH + (rH - doorH)/2, doorZ);
+  }
+
+  // Mur extérieur (X = rXmin = -36) — plein
+  box(wallT, rH, rD, mRoomB, rXmin, rFloorY + rH/2, rCZ);
+
+  // Mur arrière (Z = rZfront = -27) — plein
+  box(rW + wallT*2, rH, wallT, mRoomB, rCX, rFloorY + rH/2, rZfront);
+
+  // Mur avant (Z = rZback = +18) — plein
+  box(rW + wallT*2, rH, wallT, mRoomB, rCX, rFloorY + rH/2, rZback);
+
+  // Lumières dans la salle
+  [-10, rCZ, 10].forEach(lz => {
+    const roomLight = new THREE.PointLight(0xffe8c0, 0.5, 14);
+    roomLight.position.set(rCX, rCeilY - 0.5, lz);
+    scene.add(roomLight);
+    const bulbMatB = new THREE.MeshBasicMaterial({color: 0xffe8a0});
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), bulbMatB);
+    bulb.position.set(rCX, rCeilY - 0.4, lz);
+    scene.add(bulb);
+    const wireMatB = new THREE.MeshLambertMaterial({color:0x222222});
+    const wire = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.5, 4), wireMatB);
+    wire.position.set(rCX, rCeilY - 0.15, lz);
+    scene.add(wire);
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+// ─── CAGE D'ESCALIER 1er ÉTAGE (au-dessus de la cage RDC) ──────────
+// Mêmes dimensions que le RDC : X=-20.21 à -12.23, Z=-27 à -35.5
+// Hauteur 1er étage : Y=5 à Y=10 — murs remontent sur toute la double hauteur
+// Trou d'accès dans le mur Z=-27 centré en X=-14.16 (sortie volée 2), largeur 3.2
+// ═══════════════════════════════════════════════════════
+{
+  const sXmin = -20.21, sXmax = -12.23;
+  const sZfront = -27, sZback = -35.5;
+  const sW  = Math.abs(sXmax - sXmin);   // 7.98
+  const sD  = Math.abs(sZback - sZfront); // 8.5
+  const sCX = (sXmin + sXmax) / 2;        // -16.22
+  const sCZ = (sZfront + sZback) / 2;     // -31.25
+  const sH  = 5;   // hauteur d'un étage
+  const sFloorY = 5;   // niveau sol 1er étage
+  const sCeilY  = 10;  // plafond 1er étage
+  const wT = 0.35;
+
+  const mRoomS  = new THREE.MeshLambertMaterial({color:0xddd4b8, map:stoneTex});
+  const mCeilS  = new THREE.MeshLambertMaterial({color:0xe8e0cc});
+  const mRoofS  = new THREE.MeshLambertMaterial({map:roofTex, color:0x6a7880});
+
+  // Pas de sol à Y=5 dans la cage : ouverture vers le bas (continuité escalier)
+
+  // Plafond 1er étage (Y=10)
+  { const pl = new THREE.Mesh(new THREE.PlaneGeometry(sW, sD), mCeilS);
+    pl.rotation.x = Math.PI/2; pl.position.set(sCX, sCeilY, sCZ); scene.add(pl); }
+
+  // Toit extérieur au-dessus de la cage
+  { const pl = new THREE.Mesh(new THREE.PlaneGeometry(sW + 0.8, sD + 0.8), mRoofS);
+    pl.rotation.x = -Math.PI/2; pl.position.set(sCX, sCeilY + 0.06, sCZ); scene.add(pl); }
+
+  // Murs latéraux sur toute la double hauteur (Y=0 à Y=10)
+  box(wT, sH*2, sD, mRoomS, sXmin, sH, sCZ);  // mur gauche X=-20.21
+  box(wT, sH*2, sD, mRoomS, sXmax, sH, sCZ);  // mur droit  X=-12.23
+  // Mur du fond (Z=-35.5), double hauteur
+  box(sW + wT*2, sH*2, wT, mRoomS, sCX, sH, sZback);
+
+  // Mur avant 1er étage (Z=-27) avec trou d'accès centré en X=-14.16, largeur 3.2
+  {
+    const doorW = 3.2, doorH = 4.5, doorX = -14.16;
+    // Segment gauche : sXmin → (doorX - doorW/2)
+    const lW = (doorX - doorW/2) - sXmin;
+    if(lW > 0.01) box(lW, sH, wT, mRoomS, sXmin + lW/2, sFloorY + sH/2, sZfront);
+    // Segment droit : (doorX + doorW/2) → sXmax
+    const rW2 = sXmax - (doorX + doorW/2);
+    if(rW2 > 0.01) box(rW2, sH, wT, mRoomS, (doorX + doorW/2) + rW2/2, sFloorY + sH/2, sZfront);
+    // Bandeau au-dessus du trou
+    box(doorW + 0.4, sH - doorH, wT, mRoomS, doorX, sFloorY + doorH + (sH - doorH)/2, sZfront);
+  }
+
+  // Lumière dans la cage 1er étage
+  const sLight2 = new THREE.PointLight(0xffe8c0, 0.6, 12);
+  sLight2.position.set(sCX, sCeilY - 0.5, sCZ); scene.add(sLight2);
+  const sBulb2 = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), new THREE.MeshBasicMaterial({color:0xffe8a0}));
+  sBulb2.position.set(sCX, sCeilY - 0.4, sCZ); scene.add(sBulb2);
+  const sWire2 = new THREE.Mesh(new THREE.CylinderGeometry(0.01,0.01,0.5,4), new THREE.MeshLambertMaterial({color:0x222222}));
+  sWire2.position.set(sCX, sCeilY - 0.15, sCZ); scene.add(sWire2);
+}
+
+// ═══════════════════════════════════════════════════════
+// ─── BIBLIOTHÈQUE — 1er ÉTAGE au-dessus du bloc arrière (RDC: principal+surveillant+sortie+toilettes)
+// Empreinte : X=-36 → +36, Z=-27 → -35.5, Y=5 → 10
+// Trou cage escalier (X=-20.21→-12.23) exclu du sol (déjà géré)
+// Porte interactive "Bibliothèque" dans mur Z=-27, centrée en X=0 (côté cour/bâtiment principal)
+// ═══════════════════════════════════════════════════════
+{
+  const bXmin = -36, bXmax = 36;
+  const bZfront = -27, bZback = -35.5;
+  const bW  = bXmax - bXmin;              // 72
+  const bD  = Math.abs(bZback - bZfront); // 8.5
+  const bCX = (bXmin + bXmax) / 2;        // 0
+  const bCZ = (bZfront + bZback) / 2;     // -31.25
+  const bH  = 5;
+  const bFloorY = 5;   // sol à Y=5
+  const bCeilY  = 10;  // plafond à Y=10
+  const wT = 0.35;
+
+  const mRoomBib  = new THREE.MeshLambertMaterial({color:0xddd4b8, map:stoneTex});
+  const mFloorBib = new THREE.MeshLambertMaterial({color:0xc8b898, map:paveTex});
+  const mCeilBib  = new THREE.MeshLambertMaterial({color:0xe8e0cc});
+  const mRoofBib  = new THREE.MeshLambertMaterial({map:roofTex, color:0x6a7880});
+
+  // Sol — en 2 morceaux pour laisser le trou de la cage d'escalier (X=-20.21→-12.23)
+  const stairXmin = -20.21, stairXmax = -12.23;
+  // Partie gauche : bXmin → stairXmin
+  { const w = stairXmin - bXmin;
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(w, bD), mFloorBib);
+    pl.rotation.x = -Math.PI/2; pl.position.set(bXmin + w/2, bFloorY + 0.01, bCZ);
+    pl.receiveShadow = true; scene.add(pl); }
+  // Partie droite : stairXmax → bXmax
+  { const w = bXmax - stairXmax;
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(w, bD), mFloorBib);
+    pl.rotation.x = -Math.PI/2; pl.position.set(stairXmax + w/2, bFloorY + 0.01, bCZ);
+    pl.receiveShadow = true; scene.add(pl); }
+
+  // Plafond
+  { const pl = new THREE.Mesh(new THREE.PlaneGeometry(bW, bD), mCeilBib);
+    pl.rotation.x = Math.PI/2; pl.position.set(bCX, bCeilY, bCZ); scene.add(pl); }
+
+  // Toit extérieur
+  { const pl = new THREE.Mesh(new THREE.PlaneGeometry(bW + 0.8, bD + 0.8), mRoofBib);
+    pl.rotation.x = -Math.PI/2; pl.position.set(bCX, bCeilY + 0.06, bCZ); scene.add(pl); }
+
+  // Mur gauche (X=-36) — plein, double hauteur pour continuer le mur extérieur
+  box(wT, bH*2, bD, mRoomBib, bXmin, bH, bCZ);
+
+  // Mur droit (X=+36) — plein, double hauteur
+  box(wT, bH*2, bD, mRoomBib, bXmax, bH, bCZ);
+
+  // Mur du fond (Z=-35.5) — plein sur toute la largeur
+  box(bW + wT*2, bH, wT, mRoomBib, bCX, bFloorY + bH/2, bZback);
+
+  // Mur avant (Z=-27) avec trou pour la porte Bibliothèque centré en X=0, largeur 3.8, hauteur 4.5
+  {
+    const doorW = 3.8, doorH = 4.5, doorX = 0;
+    // Segment gauche : bXmin → (doorX - doorW/2) — avec trou cage escalier dedans
+    const leftEnd = doorX - doorW/2;
+    // On fait ce mur en 2 sous-segments : de bXmin à stairXmin, puis de stairXmax à leftEnd
+    { const w1 = stairXmin - bXmin;
+      if(w1 > 0.01) box(w1, bH, wT, mRoomBib, bXmin + w1/2, bFloorY + bH/2, bZfront); }
+    // Entre sortie cage et porte bib
+    { const w2 = leftEnd - stairXmax;
+      if(w2 > 0.01) box(w2, bH, wT, mRoomBib, stairXmax + w2/2, bFloorY + bH/2, bZfront); }
+    // Segment droit : (doorX + doorW/2) → bXmax
+    { const w3 = bXmax - (doorX + doorW/2);
+      if(w3 > 0.01) box(w3, bH, wT, mRoomBib, (doorX + doorW/2) + w3/2, bFloorY + bH/2, bZfront); }
+    // Bandeau au-dessus de la porte
+    box(doorW + 0.4, bH - doorH, wT, mRoomBib, doorX, bFloorY + doorH + (bH - doorH)/2, bZfront);
+
+    // Piliers décoratifs de chaque côté de la porte
+    const mStoneLight2 = new THREE.MeshLambertMaterial({color:0xe0d8c0});
+    [-doorW/2 - 0.3, doorW/2 + 0.3].forEach(dx => {
+      box(0.5, doorH + 0.4, 0.45, mStoneLight2, doorX + dx, bFloorY + (doorH+0.4)/2, bZfront + 0.1);
+    });
+    box(0.4, 0.4, doorW + 0.8, mStoneLight2, doorX, bFloorY + doorH + 0.2, bZfront);
+  }
+
+  // Lumières réparties dans la bibliothèque
+  [-20, -8, 4, 16, 28].forEach(lx => {
+    const bLight = new THREE.PointLight(0xffe8c0, 0.5, 15);
+    bLight.position.set(lx, bCeilY - 0.5, bCZ); scene.add(bLight);
+    const bBulb = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), new THREE.MeshBasicMaterial({color:0xffe8a0}));
+    bBulb.position.set(lx, bCeilY - 0.4, bCZ); scene.add(bBulb);
+    const bWire = new THREE.Mesh(new THREE.CylinderGeometry(0.01,0.01,0.6,4), new THREE.MeshLambertMaterial({color:0x222222}));
+    bWire.position.set(lx, bCeilY - 0.12, bCZ); scene.add(bWire);
+  });
+}
+
+// Porte Bibliothèque : dans mur Z=-27, X=0, 1er étage (yOffset=5)
+
+
+// Z : -27   → -35.30 (profondeur 8.3)
+// Entrée via porte Toilette (X=22.5, Z=-27)
+// ═══════════════════════════════════════════════════════
+{
+  const tRoomXmin = 20.65, tRoomXmax = 35.25;
+  const tRoomZfront = -27,  tRoomZback = -35.30;
+  const tRoomW = tRoomXmax - tRoomXmin;   // 14.6
+  const tRoomD = Math.abs(tRoomZback - tRoomZfront); // 8.3
+  const tRoomCX = (tRoomXmin + tRoomXmax) / 2;  // 27.95
+  const tRoomCZ = (tRoomZfront + tRoomZback) / 2; // -31.15
+  const tRoomH = 4.0;
+  const wT = 0.35;
+
+  // Matériaux salle de bains
+  const mTile = (()=>{
+    const tc = document.createElement('canvas'); tc.width=tc.height=128;
+    const tx = tc.getContext('2d');
+    tx.fillStyle='#e8f0f8'; tx.fillRect(0,0,128,128);
+    // Carreaux blancs/bleus
+    for(let r=0;r<8;r++) for(let c=0;c<8;c++){
+      const v = 220 + Math.random()*20;
+      const b = 235 + Math.random()*20;
+      tx.fillStyle=`rgb(${Math.round(v)},${Math.round(v)},${Math.round(b)})`;
+      tx.fillRect(c*16+1,r*16+1,14,14);
+    }
+    tx.strokeStyle='rgba(140,160,200,0.5)'; tx.lineWidth=1;
+    for(let i=0;i<=128;i+=16){
+      tx.beginPath();tx.moveTo(i,0);tx.lineTo(i,128);tx.stroke();
+      tx.beginPath();tx.moveTo(0,i);tx.lineTo(128,i);tx.stroke();
+    }
+    const t=new THREE.CanvasTexture(tc);
+    t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(5,3); return t;
+  })();
+  const mTileFloor = (()=>{
+    const tc=document.createElement('canvas'); tc.width=tc.height=128;
+    const tx=tc.getContext('2d');
+    tx.fillStyle='#d0d8e0'; tx.fillRect(0,0,128,128);
+    for(let r=0;r<4;r++) for(let c=0;c<4;c++){
+      const v=200+Math.random()*20;
+      tx.fillStyle=`rgb(${Math.round(v)},${Math.round(v+4)},${Math.round(v+12)})`;
+      tx.fillRect(c*32+2,r*32+2,28,28);
+    }
+    tx.strokeStyle='rgba(100,120,160,0.4)'; tx.lineWidth=1.5;
+    for(let i=0;i<=128;i+=32){
+      tx.beginPath();tx.moveTo(i,0);tx.lineTo(i,128);tx.stroke();
+      tx.beginPath();tx.moveTo(0,i);tx.lineTo(128,i);tx.stroke();
+    }
+    const t=new THREE.CanvasTexture(tc);
+    t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(8,5); return t;
+  })();
+  const mWallTile = new THREE.MeshLambertMaterial({map:mTile, color:0xf0f4f8});
+  const mFloorTile= new THREE.MeshLambertMaterial({map:mTileFloor});
+  const mCeil     = new THREE.MeshLambertMaterial({color:0xf4f4f0});
+
+  // Sol carrelé
+  const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(tRoomW, tRoomD), mFloorTile);
+  floorMesh.rotation.x=-Math.PI/2; floorMesh.position.set(tRoomCX,0.02,tRoomCZ);
+  floorMesh.receiveShadow=true; scene.add(floorMesh);
+
+  // Plafond
+  const ceilMesh = new THREE.Mesh(new THREE.PlaneGeometry(tRoomW, tRoomD), mCeil);
+  ceilMesh.rotation.x=Math.PI/2; ceilMesh.position.set(tRoomCX,tRoomH,tRoomCZ);
+  scene.add(ceilMesh);
+
+  // Mur gauche (X=tRoomXmin=20.65) — partagé avec couloir droit du 1er couloir
+  box(wT, tRoomH, tRoomD, mWallTile, tRoomXmin, tRoomH/2, tRoomCZ);
+
+  // Mur droit (X=tRoomXmax=35.25) — côté extérieur 2e couloir
+  box(wT, tRoomH, tRoomD, mWallTile, tRoomXmax, tRoomH/2, tRoomCZ);
+
+  // Mur du fond (Z=tRoomZback=-35.30)
+  box(tRoomW+wT*2, tRoomH, wT, mWallTile, tRoomCX, tRoomH/2, tRoomZback);
+
+  // Mur avant (Z=-27) avec trou pour porte Toilette (X=22.5, larg 2.2)
+  const tDoorX=22.5, tDoorW=2.2;
+  // Segment X=20.65 → 21.4
+  box(tDoorX-tDoorW/2 - tRoomXmin, tRoomH, wT, mWallTile,
+      tRoomXmin + (tDoorX-tDoorW/2 - tRoomXmin)/2, tRoomH/2, tRoomZfront);
+  // Segment X=23.6 → 35.25
+  box(tRoomXmax-(tDoorX+tDoorW/2), tRoomH, wT, mWallTile,
+      (tDoorX+tDoorW/2 + tRoomXmax)/2, tRoomH/2, tRoomZfront);
+  // Bandeau au-dessus de la porte (doorH=4.2, roomH=4.0 → juste une fine bande)
+  // doorH > roomH donc pas de bandeau nécessaire, la porte remplit toute la hauteur
+
+  // Lumières au plafond (néons)
+  [tRoomCX-3.5, tRoomCX+3.5].forEach(lx=>{
+    const neonLight = new THREE.PointLight(0xd8eeff, 0.7, 10);
+    neonLight.position.set(lx, tRoomH-0.3, tRoomCZ);
+    scene.add(neonLight);
+    // Tube néon
+    const neonMat = new THREE.MeshBasicMaterial({color:0xe8f4ff});
+    const neon = new THREE.Mesh(new THREE.BoxGeometry(2.2,0.08,0.12), neonMat);
+    neon.position.set(lx, tRoomH-0.05, tRoomCZ); scene.add(neon);
+    // Grille fixation
+    const fixMat = new THREE.MeshLambertMaterial({color:0x888888});
+    const fix = new THREE.Mesh(new THREE.BoxGeometry(2.4,0.05,0.20), fixMat);
+    fix.position.set(lx, tRoomH-0.03, tRoomCZ); scene.add(fix);
+  });
+
+  // ── CABINES DE TOILETTES ──────────────────────────────
+  // 3 cabines côte à côte le long du mur du fond (Z≈-34.5 → -35)
+  // Chaque cabine : largeur 2.2, profondeur 2.0
+  const cabW=2.2, cabD=2.0, cabH=2.5, cabZ=tRoomZback+cabD/2+wT;
+  const mCabWall = new THREE.MeshLambertMaterial({color:0x8899bb}); // cloison bleue
+  const mCabDoor = new THREE.MeshLambertMaterial({color:0x5a7aaa}); // porte cabine
+  const mCabFloor= new THREE.MeshLambertMaterial({color:0xc8d0dc});
+
+  [0,1,2].forEach(i=>{
+    const cx = tRoomXmin + 1.5 + i*(cabW+0.15);
+    // Cloisons latérales
+    box(wT*0.7, cabH, cabD, mCabWall, cx-cabW/2, cabH/2, cabZ);
+    box(wT*0.7, cabH, cabD, mCabWall, cx+cabW/2, cabH/2, cabZ);
+    // Porte de cabine (petit vantail)
+    const cabPivot = new THREE.Group();
+    cabPivot.position.set(cx+cabW/2-0.12, 0, tRoomZback+wT+0.1);
+    scene.add(cabPivot);
+    const cabLeaf=new THREE.Mesh(new THREE.BoxGeometry(cabW-0.25,cabH-0.3,0.06),mCabDoor);
+    cabLeaf.position.set(-(cabW/2-0.12),(cabH-0.3)/2,0); cabLeaf.castShadow=true; cabPivot.add(cabLeaf);
+    // Poignée cabine
+    const cpH=new THREE.Mesh(new THREE.SphereGeometry(0.035,6,5), new THREE.MeshLambertMaterial({color:0xd0c060}));
+    cpH.position.set(-(cabW-0.35), cabH*0.5, 0.06); cabPivot.add(cpH);
+    // Numéro cabine
+    const numC=document.createElement('canvas'); numC.width=64; numC.height=64;
+    const nCtx=numC.getContext('2d');
+    nCtx.fillStyle='#5a7aaa'; nCtx.fillRect(0,0,64,64);
+    nCtx.fillStyle='#fff'; nCtx.font='bold 36px Arial'; nCtx.textAlign='center'; nCtx.textBaseline='middle';
+    nCtx.fillText(i+1,32,32);
+    const numMesh=new THREE.Mesh(new THREE.PlaneGeometry(0.18,0.18),
+      new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(numC),side:THREE.DoubleSide}));
+    numMesh.position.set(cx, cabH*0.8, tRoomZback+wT+0.12); scene.add(numMesh);
+  });
+
+  // ── LAVABOS (contre le mur gauche X≈21) ───────────────────────
+  const mPorcelain = new THREE.MeshLambertMaterial({color:0xf4f4f2});
+  const mChrome    = new THREE.MeshLambertMaterial({color:0xd8dce8});
+  [tRoomCZ-1.5, tRoomCZ+1.5].forEach(lz=>{
+    const lx = tRoomXmin+0.55;
+    // Vasque
+    const basin=new THREE.Mesh(new THREE.BoxGeometry(0.65,0.12,0.45),mPorcelain);
+    basin.position.set(lx,0.88,lz); basin.castShadow=true; scene.add(basin);
+    // Support mural
+    const sup=new THREE.Mesh(new THREE.BoxGeometry(0.55,0.06,0.38),new THREE.MeshLambertMaterial({color:0xd8d0c0}));
+    sup.position.set(lx,0.82,lz); scene.add(sup);
+    // Robinet
+    const tap=new THREE.Mesh(new THREE.CylinderGeometry(0.018,0.018,0.22,8),mChrome);
+    tap.position.set(lx,1.04,lz-0.08); scene.add(tap);
+    const tapHead=new THREE.Mesh(new THREE.SphereGeometry(0.03,6,5),mChrome);
+    tapHead.position.set(lx,1.15,lz-0.08); scene.add(tapHead);
+    // Miroir au mur
+    const mirrorMat=new THREE.MeshLambertMaterial({color:0xd0e4f0,transparent:true,opacity:0.7});
+    const mirror=new THREE.Mesh(new THREE.BoxGeometry(0.04,0.55,0.42),mirrorMat);
+    mirror.position.set(tRoomXmin+0.10,1.30,lz); scene.add(mirror);
+    // Cadre miroir
+    const frameMirror=new THREE.MeshLambertMaterial({color:0x888898});
+    [[0.04,0.04,0.46],[0.04,0.04,0.46],[0.04,0.58,0.04],[0.04,0.58,0.04]].forEach(([fw,fh,fd],fi)=>{
+      const fz2=[lz-0.22,lz+0.22,lz-0.22,lz+0.22][fi];
+      const fy=[1.30,1.30,1.08,1.52][fi];
+      const fm=new THREE.Mesh(new THREE.BoxGeometry(0.05,fh,fd),frameMirror);
+      fm.position.set(tRoomXmin+0.09,fy,fz2); scene.add(fm);
+    });
+    // Distributeur de savon
+    const soap=new THREE.Mesh(new THREE.BoxGeometry(0.10,0.16,0.08),new THREE.MeshLambertMaterial({color:0x60a8d8}));
+    soap.position.set(lx,1.06,lz+0.16); scene.add(soap);
+  });
+
+  // Panneau de porte côté intérieur (indique "Toilettes" en bleu)
+  const intSign=new THREE.Mesh(new THREE.BoxGeometry(0.60,0.26,0.04),
+    new THREE.MeshLambertMaterial({map:(()=>{
+      const sc=document.createElement('canvas'); sc.width=256; sc.height=96;
+      const sx=sc.getContext('2d');
+      sx.fillStyle='#1a2850'; sx.fillRect(0,0,256,96);
+      sx.strokeStyle='#4080cc'; sx.lineWidth=3; sx.strokeRect(4,4,248,88);
+      sx.fillStyle='#a0c8ff'; sx.font='bold 28px Arial'; sx.textAlign='center'; sx.textBaseline='middle';
+      sx.fillText('🚻 Toilettes', 128, 48);
+      return new THREE.CanvasTexture(sc);
+    })()}));
+  intSign.position.set(tRoomXmin+0.08, tRoomH-0.6, tRoomCZ); intSign.rotation.y=Math.PI/2; scene.add(intSign);
+}
+
+// ─── SYSTÈME DE COLLISION AABB ──────────────────────────────
+const PLAYER_R = 0.35;
+
+// Chaque collider: {x1,x2,z1,z2}  (x1<x2, z1<z2)
+// doorColliders: {x1,x2,z1,z2,doorId} → actif seulement porte FERMÉE
+const staticColliders = [];
+const doorColliders   = [];
+
+function sBox(x1,z1,x2,z2){ staticColliders.push({x1,z1,x2,z2}); }
+function dBox(x1,z1,x2,z2,id){ doorColliders.push({x1,z1,x2,z2,doorId:id}); }
+
+// ── helpers pour murs ──
+function sWallX(cx,cz,w,d){ sBox(cx-w/2, cz-d/2, cx+w/2, cz+d/2); }
+function dWallX(cx,cz,w,d,id){ dBox(cx-w/2, cz-d/2, cx+w/2, cz+d/2, id); }
+
+// ════════════════════════════════════
+// MUR Z=+18 (façade portail côté cour)
+// ════════════════════════════════════
+// Mur gauche  X=-24 à -8.9 (pilier gauche portail)
+sBox(-24, 17.75, -8.9, 18.25);
+// Pilier gauche portail
+sBox(-9.0, 16.6, -7.1, 19.0);
+// Pilier droit portail
+sBox( 7.1, 16.6,  9.0, 19.0);
+// Mur droit X=8.9 à 24
+sBox( 8.9, 17.75, 24.0, 18.25);
+// Fermetures entre X=24↔27 et X=-24↔-27
+sBox(-27.0, 17.75, -24.0, 18.25);
+sBox( 24.0, 17.75,  27.0, 18.25);
+// Fermetures 2e couloir X=27↔36
+sBox(-36.0, 17.75, -27.0, 18.25);
+sBox( 27.0, 17.75,  36.0, 18.25);
+
+// ════════════════════════════════════
+// MURS LATÉRAUX X=-24 et X=+24
+// ════════════════════════════════════
+// Porte gauche : Z=-10, ouverture de -11.5 à -8.5
+// Porte droite : Z=-10, ouverture de -11.5 à -8.5
+// Côté court Z=-19.5 à -11.75 : plein
+sBox(-24.2, -19.5, -23.8, -11.75);
+sBox( 23.8, -19.5,  24.2, -11.75);
+// Côté long : avant trou de porte : Z=-11.5 à -8.25 (il n'y a pas de mur ici, c'est le trou porte)
+// Z=-8.25 à +13.6 (pas de trou ici dans le côté long, c'est plein)
+// ATTENTION: la porte latérale est dans le mur X=-24 à Z=-10
+// Segment Z=-19.5 à -11.5 déjà couvert (côté court)
+// Côté long : on part de Z=-8.5 côté cour (après le trou porte)
+sBox(-24.2, -8.5,  -23.8, 13.6);   // plein (après trou porte gauche)
+sBox( 23.8, -8.5,   24.2, 13.6);   // plein (après trou porte droite)
+sBox(-24.2, 13.6,  -23.8, 18.0);   // plein (Z=13.6 à 18)
+sBox( 23.8, 13.6,   24.2, 18.0);
+// Trou porte gauche Z=-11.5 à -8.5 → doorCollider
+dBox(-24.2, -11.5, -23.8, -8.5, 'left');
+dBox( 23.8, -11.5,  24.2, -8.5, 'right');
+
+// ════════════════════════════════════
+// MURS COULOIR EN U : X=-27 et X=+27
+// ════════════════════════════════════
+// Porte endLeft/Right : Z=15.8, ouverture de 13.9 à 17.7
+sBox(-27.2, -27.0, -26.8, 13.9);   // plein avant trou
+dBox(-27.2,  13.9, -26.8, 17.7, 'endLeft');
+sBox(-27.2,  17.7, -26.8, 18.1);   // plein après trou
+sBox( 26.8, -27.0,  27.2, 13.9);
+dBox( 26.8,  13.9,  27.2, 17.7, 'endRight');
+sBox( 26.8,  17.7,  27.2, 18.1);
+
+// ════════════════════════════════════
+// MURS EXTÉRIEURS 2e COULOIR X=±36
+// ════════════════════════════════════
+sBox(-36.2, -27.0, -35.8, 18.1);
+sBox( 35.8, -27.0,  36.2, 18.1);
+
+// ════════════════════════════════════
+// MUR ARRIÈRE Z=-27
+// Porte fond : X=-2.2 à +2.2 (id 'back')
+// ════════════════════════════════════
+// Segment 2e couloir gauche X=-36 à -27
+sBox(-36.0, -27.2, -27.0, -26.8);
+// Bout extérieur gauche X=-27 à -25.5
+sBox(-27.0, -27.2, -25.5, -26.8);
+// trou gauche X=-25.5 à -13.5 (ouverture vers chambre)
+// Porte mystery dans ce trou centrée en X=-22.35, largeur 3.4 → ouverture -24.05 à -20.65
+sBox(-25.5, -27.2, -24.05, -26.8);
+dBox(-24.05, -27.2, -20.65, -26.8, 'mystery');
+// Ouverture escalier à X=-17.91 (largeur 3.0) : X=-19.41 à -16.41
+sBox(-20.65, -27.2, -19.41, -26.8); // gauche (X=-20.65 à -19.41)
+sBox(-16.41, -27.2, -13.5,  -26.8); // droite (X=-16.41 à -13.5)
+// Segment plein gauche X=-13.5 à -2.2
+sBox(-13.5, -27.2,  -2.2, -26.8);
+// Trou porte fond
+dBox( -2.2, -27.2,   2.2, -26.8, 'back');
+// Segment plein droit X=+2.2 à +13.5
+sBox(  2.2, -27.2,  13.5, -26.8);
+// trou droit X=+13.5 à +25.5 → Porte Sortie (X≈17.2, larg 2.2) + Porte Toilette (X≈22.5, larg 2.2)
+sBox( 13.5, -27.2,  16.1, -26.8);
+dBox( 16.1, -27.2,  18.3, -26.8, 'sortie');
+sBox( 18.3, -27.2,  21.4, -26.8);
+dBox( 21.4, -27.2,  23.6, -26.8, 'toilette');
+sBox( 23.6, -27.2,  25.5, -26.8);
+// Bout extérieur droit X=+25.5 à +27
+sBox( 25.5, -27.2,  27.0, -26.8);
+sBox( 25.5, -27.2,  27.0, -26.8);
+// Segment 2e couloir droit X=+27 à +36
+sBox( 27.0, -27.2,  36.0, -26.8);
+
+// ════════════════════════════════════
+// CHAMBRE (Z=-27 à -35.5, X=-20.21 à +14.80)
+// Mur avant : segments côtés du trou porte (trou déjà géré par 'back' ci-dessus)
+// ════════════════════════════════════
+// Côté gauche du trou : X=-20.21 à -2.2, avec ouverture escalier X=-19.41 à -16.41
+sBox(-20.21, -27.2, -19.41, -26.8); // X=-20.21 à -19.41
+sBox(-16.41, -27.2,  -2.2,  -26.8); // X=-16.41 à -2.2
+// Côté droit du trou : X=+2.2 à +14.80
+sBox(  2.2,  -27.2,  14.80,-26.8);
+// Mur gauche chambre
+sBox(-20.41, -35.5, -20.01, -27.0);
+// Mur droit chambre
+sBox( 14.60, -35.5,  15.00, -27.0);
+// Mur fond chambre
+sBox(-20.21, -35.7,  14.80, -35.3);
+
+// ════════════════════════════════════
+// SALLE DES TOILETTES (X=20.65→35.25, Z=-27→-35.30)
+// ════════════════════════════════════
+// Mur gauche (X=20.65)
+sBox( 20.45, -35.3,  20.85, -27.0);
+// Mur droit (X=35.25)
+sBox( 35.05, -35.3,  35.45, -27.0);
+// Mur fond (Z=-35.30)
+sBox( 20.65, -35.5,  35.25, -35.10);
+// Mur avant — segments autour de la porte toilette (X=22.5 ± 1.1)
+// Segment X=20.65 → 21.4 (avant porte)
+sBox( 20.65, -27.2,  21.40, -26.8);
+// Segment X=23.6 → 35.25 (après porte)
+sBox( 23.60, -27.2,  35.25, -26.8);
+
+// ════════════════════════════════════
+// FAÇADE BÂTIMENT PRINCIPAL Z=-19.5
+// Seulement X=-24 à +24 (les couloirs X=±24↔27 sont ouverts)
+// ════════════════════════════════════
+// Façade gauche: X=-24 à -2.4
+sBox(-24.0, -19.8, -2.4, -19.2);
+// Porte monumentale principale
+dBox(  -3.0, -19.8,  3.0, -19.2, 'mainPorte');
+// Façade droite: X=+2.4 à +24
+sBox(   2.4, -19.8, 24.0, -19.2);
+
+// Piliers porte principale
+sBox(-3.0, -19.9, -1.8, -18.9);
+sBox( 1.8, -19.9,  3.0, -18.9);
+
+// ════════════════════════════════════
+// ARBRES (troncs ~0.28 rayon)
+// ════════════════════════════════════
+const _tp = [];
+[-1,1].forEach(s=>{ [-2,-7,-13,5,10].forEach(tz=>_tp.push([s*5.5,tz])); });
+[-1,1].forEach(s=>{ const tz=-10+s*5.5; [-5,-11,-17,5,11,17].forEach(tx=>_tp.push([tx,tz])); });
+_tp.forEach(([tx,tz])=>sBox(tx-0.28, tz-0.28, tx+0.28, tz+0.28));
+
+// ════════════════════════════════════
+// BANCS
+// ════════════════════════════════════
+sBox(-4.8,  6.8, -4.2,  9.2);  // banc gauche
+sBox( 4.2,  6.8,  4.8,  9.2);  // banc droit
+sBox(-14.2,-7.1, -11.8,-5.9);  // banc gauche fond
+sBox( 11.8,-7.1,  14.2,-5.9);  // banc droit fond
+
+// ════════════════════════════════════
+// LAMPADAIRES
+// ════════════════════════════════════
+sBox(-16.15,-2.15,-15.85,-1.85);
+sBox( 15.85,-2.15, 16.15,-1.85);
+sBox(-16.15,-18.15,-15.85,-17.85);
+sBox( 15.85,-18.15, 16.15,-17.85);
+
+// ════════════════════════════════════
+// TABLEAU D'AFFICHAGE (poteaux)
+// ════════════════════════════════════
+sBox(3.85, 0.8, 4.15, 5.4);
+
+// ════════════════════════════════════
+// RÉSOLUTION : séparer axe X et axe Z
+// pour éviter qu'un mur ne "pompe" le joueur dans un autre
+// ════════════════════════════════════
+function collidesBox(px, pz, b){
+  const r = PLAYER_R;
+  return px > b.x1-r && px < b.x2+r && pz > b.z1-r && pz < b.z2+r;
+}
+function pushOutBox(px, pz, b){
+  const r = PLAYER_R;
+  const dL = px - (b.x1 - r);
+  const dR = (b.x2 + r) - px;
+  const dF = pz - (b.z1 - r);
+  const dB = (b.z2 + r) - pz;
+  const m = Math.min(dL, dR, dF, dB);
+  if(m === dL) px = b.x1 - r;
+  else if(m === dR) px = b.x2 + r;
+  else if(m === dF) pz = b.z1 - r;
+  else              pz = b.z2 + r;
+  return [px, pz];
+}
+
+function isOpen(doorId){
+  const door = DOORS.find(d => d.id === doorId);
+  return door && door.open;
+}
+
+function resolveCollisions(px, pz){
+  // Essayer mouvement X seul, puis Z seul pour éviter le "glissement" indésirable
+  // On passe 2 fois pour rattraper les coins
+  const onUpper = camera.position.y > 4.5; // joueur au 1er étage
+  for(let pass=0; pass<2; pass++){
+    for(const b of staticColliders){
+      // Les colliders du mur Z=-27 (zone -27.2 à -26.8) ne bloquent pas au 1er étage
+      if(onUpper && b.z1 >= -27.3 && b.z2 <= -26.7) continue;
+      if(collidesBox(px,pz,b)) [px,pz] = pushOutBox(px,pz,b);
+    }
+    for(const b of doorColliders){
+      if(isOpen(b.doorId)) continue;
+      if(onUpper && b.z1 >= -27.3 && b.z2 <= -26.7) continue;
+      if(collidesBox(px,pz,b)) [px,pz] = pushOutBox(px,pz,b);
+    }
+    // Jardinier dynamique
+    const gr=0.42, gx=gardener.position.x, gz=gardener.position.z;
+    const gb={x1:gx-gr,z1:gz-gr,x2:gx+gr,z2:gz+gr};
+    if(collidesBox(px,pz,gb)) [px,pz] = pushOutBox(px,pz,gb);
+  }
+  return [px, pz];
+}
+
+const BOUNDS = { minX:-35.5, maxX:35.5, minZ:-35.3, maxZ:17 };
+
+let last=0;
+function loop(ts){
+  const dt=Math.min((ts-last)/1000,0.05);last=ts;
+  if(inDialogue){ renderer.render(scene,camera); requestAnimationFrame(loop); return; }
+  const speed=6;
+  let fx=0,fz=0;
+  if(keys['z']||keys['arrowup'])   fz=1;
+  if(keys['s']||keys['arrowdown']) fz=-1;
+  if(keys['q']||keys['arrowleft']) fx=1;
+  if(keys['d']||keys['arrowright'])fx=-1;
+  fx+=jLx; fz-=jLy;
+  if(jRx!==0) camYaw-=jRx*0.05;
+  if(!flyMode && jRy!==0){camPitch+=jRy*2*dt;camPitch=Math.max(-0.6,Math.min(0.7,camPitch));}
+  const cos=Math.cos(camYaw),sin=Math.sin(camYaw);
+  camera.position.x+=(-fx*cos+fz*sin)*speed*dt;
+  camera.position.z+=(fx*sin+fz*cos)*speed*dt;
+  if(!flyMode){
+    // Calcul de la hauteur du sol selon la position (escalier en U)
+    const px = camera.position.x, pz = camera.position.z;
+
+    // Paramètres escalier (identiques à la construction)
+    const nSteps = 10, stepH = 0.25, stepD = 0.75;
+    const v1Xcenter = -18.6, v1Zstart = -27.5;
+    const landingY = nSteps * stepH; // 2.5
+    const landingZcenterFixed = -34.0;
+    const v2Xcenter = -13.8;
+    const v2Zstart  = landingZcenterFixed - 0.8; // -34.8
+    const stairW = 1.8;
+    const FL = 5;
+
+    function getFloorY(){
+      const currentY = camera.position.y;
+      const onUpperFloor = currentY > 6.0;
+
+      // ── ESCALIER prioritaire ──
+
+      // Volée 1 : X≈-18.6, descend vers Z-
+      const v1Zend = v1Zstart - nSteps * stepD; // -35.0
+      if(Math.abs(px - v1Xcenter) < stairW && pz >= v1Zend && pz <= v1Zstart + 0.5){
+        const progress = (v1Zstart - pz) / (nSteps * stepD);
+        return Math.max(0, Math.min(1, progress)) * landingY;
+      }
+
+      // Palier intermédiaire (zone large autour de Z=-34)
+      if(px >= -20.21 && px <= -12.23 && pz >= -35.5 && pz <= -32.5){
+        return landingY;
+      }
+
+      // Volée 2 : X≈-13.8, remonte vers Z+ (de -34.8 vers -27.3)
+      const v2Zend = v2Zstart + nSteps * stepD; // -34.8 + 7.5 = -27.3
+      if(Math.abs(px - v2Xcenter) < stairW && pz >= v2Zstart && pz <= v2Zend + 1.0){
+        const progress = (pz - v2Zstart) / (nSteps * stepD);
+        return landingY + Math.max(0, Math.min(1, progress)) * landingY;
+      }
+
+      // ── Zone de transition escalier → 1er étage (évite le trou entre Z=-27.3 et Z=-27) ──
+      if(px >= -16.5 && px <= -11.0 && pz >= -28.5 && pz <= -26.0){
+        return FL;
+      }
+
+      // ── 2ème étage : seulement si déjà monté ──
+      if(onUpperFloor){
+        if(px >= -36 && px <= -24 && pz >= -27 && pz <= 18) return FL;
+        if(px >= 24  && px <= 36  && pz >= -27 && pz <= 18) return FL;
+        if(px >= -24 && px <= 24  && pz >= -27 && pz <= -19.5) return FL;
+        if(px >= -36 && px <= 36  && pz >= -35.5 && pz <= -27) return FL; // bibliothèque
+      }
+
+      return 0;
+    }
+
+    const floorY = getFloorY();
+    camera.position.y = floorY + 1.7;
+
+    // Collision uniquement au sol (pas en vol)
+    let [nx, nz] = resolveCollisions(camera.position.x, camera.position.z);
+    nx = Math.max(BOUNDS.minX, Math.min(BOUNDS.maxX, nx));
+    nz = Math.max(BOUNDS.minZ, Math.min(BOUNDS.maxZ, nz));
+    camera.position.x = nx;
+    camera.position.z = nz;
+  } else {
+    if(jRy!==0) camera.position.y -= jRy*flySpeed*dt;
+    camera.position.x = Math.max(BOUNDS.minX, Math.min(BOUNDS.maxX, camera.position.x));
+    camera.position.z = Math.max(BOUNDS.minZ, Math.min(BOUNDS.maxZ, camera.position.z));
+  }
+  const dir=new THREE.Vector3(
+    Math.sin(camYaw)*Math.cos(camPitch),
+    -Math.sin(camPitch),
+    Math.cos(camYaw)*Math.cos(camPitch)
+  );
+  camera.lookAt(camera.position.clone().add(dir));
+
+  // ─── PORTES : proximité + animation ──────────────────────────
+  const camPos2D = new THREE.Vector3(camera.position.x, 1.7, camera.position.z);
+  // Détermine si le joueur est au 1er étage (y > 4.5) ou au rez-de-chaussée
+  const playerOnUpper = camera.position.y > 4.5;
+  let nearDoor = null;
+  let nearDist = Infinity;
+  DOORS.forEach(door=>{
+    // Ne pas activer une porte d'un étage différent de celui du joueur
+    const doorOnUpper = door.floor === 1;
+    if(playerOnUpper !== doorOnUpper) return;
+    // Porte principale : rayon plus grand car le joueur s'en approche via les marches
+    const radius = door.id==='main' ? 5.5 : 4.5;
+    const dist = camPos2D.distanceTo(door.pos);
+    if(dist < radius && dist < nearDist){ nearDoor = door; nearDist = dist; }
+  });
+
+  DOORS.forEach(door=>{
+    const isNear = door === nearDoor;
+    if(isNear !== door.highlighted){
+      door.highlighted = isNear;
+      door.leaves.forEach(lf=>{ if(lf.glowMesh) lf.glowMesh.visible = isNear; });
+    }
+    door.animAngle += (door.targetAngle - door.animAngle) * Math.min(dt*4, 1);
+    const t = door.animAngle;
+    if(door.id === 'main' || door.id === 'back' || door.id === 'mystery' || door.id === 'mainPorte' || door.id === 'sortie' || door.id === 'toilette' || door.id === 'biblio'){
+      // Porte dans plan XY, pivote autour de Y (charnière verticale sur bord X)
+      door.leaves.forEach(lf=>{
+        lf.pivot.rotation.y = lf.side * t * Math.PI * 0.46;
+      });
+    } else {
+      // Portes latérales dans plan YZ, pivote autour de Y (charnière sur bord Z)
+      door.leaves.forEach(lf=>{
+        lf.pivot.rotation.y = lf.lr * door.outDir * t * Math.PI * 0.46;
+      });
+    }
+  });
+
+
+  // ─── PORTAIL DE FER : animation ──────────────────────────────
+  gateAngle += (gateTargetAngle - gateAngle) * Math.min(dt * 1.5, 1);
+  // Ouverture vers l'intérieur (Z-) : pivot gauche rotation positive, droit négative
+  gateLeftPivot.rotation.y  =  gateAngle * Math.PI * 0.46;
+  gateRightPivot.rotation.y = -gateAngle * Math.PI * 0.46;
+
+  // ─── JARDINIER : animation membres ──────────────────────────
+  {
+    // Machine à états
+    if(gardenerState==='walking'){
+      const target = (gardenerGateAction || gardenerCloseAction) ? GARDENER_GATE :
+                     (gardenerActivity==='watering' ? GARDENER_WATER1 : GARDENER_RAKE1);
+      const dx=target.x-gardener.position.x, dz=target.z-gardener.position.z;
+      const dist=Math.sqrt(dx*dx+dz*dz);
+      if(dist>0.15){
+        gardener.position.x+=(dx/dist)*1.6*dt;
+        gardener.position.z+=(dz/dist)*1.6*dt;
+        gardener.rotation.y=Math.atan2(dx,dz);
+        gardenerWalkT+=dt*5;
+        // Balancement marche
+        const sw=Math.sin(gardenerWalkT)*0.45;
+        legLGroup.rotation.x=sw; legRGroup.rotation.x=-sw;
+        armLGroup.rotation.x=-sw*0.6; armRGroup.rotation.x=sw*0.6;
+        torsoGroup.rotation.z=Math.sin(gardenerWalkT*0.5)*0.04;
+      } else {
+        legLGroup.rotation.x=0; legRGroup.rotation.x=0;
+        armLGroup.rotation.x=0; armRGroup.rotation.x=0;
+        if(gardenerGateAction){
+          gardenerState='opening_gate'; gardenerOpTimer=2.0;
+        } else if(gardenerCloseAction){
+          gardenerState='closing_gate'; gardenerOpTimer=2.0;
+        } else {
+          gardenerState=gardenerActivity; gardenerActivityTimer=0;
+        }
+      }
+    }
+    else if(gardenerState==='opening_gate'){
+      // Tourne vers le portail, geste d'ouverture avec bras
+      gardener.rotation.y = Math.atan2(
+        GARDENER_GATE.x - gardener.position.x,
+        GARDENER_GATE.z - gardener.position.z
+      );
+      armRGroup.rotation.x = -0.9 + Math.sin(ts*0.006)*0.18;
+      armRGroup.rotation.z = -0.35;
+      armLGroup.rotation.x = -0.4;
+      gardenerOpTimer -= dt;
+      if(gardenerOpTimer <= 1.2 && !gateOpen){
+        // Ouvre le portail à mi-chemin du geste
+        gateOpen = true;
+        gateTargetAngle = 1;
+        updatePadlock();
+      }
+      if(gardenerOpTimer <= 0){
+        armRGroup.rotation.x=0; armRGroup.rotation.z=0; armLGroup.rotation.x=0;
+        gardenerGateAction = false;
+        gardenerState='returning';
+      }
+    }
+    else if(gardenerState==='closing_gate'){
+      // Tourne vers le portail, geste de fermeture (bras poussent vers l'avant)
+      gardener.rotation.y = Math.atan2(
+        GARDENER_GATE.x - gardener.position.x,
+        GARDENER_GATE.z - gardener.position.z
+      );
+      armLGroup.rotation.x = -0.8 + Math.sin(ts*0.006)*0.15;
+      armLGroup.rotation.z =  0.3;
+      armRGroup.rotation.x = -0.7 + Math.sin(ts*0.006+1)*0.12;
+      armRGroup.rotation.z = -0.3;
+      gardenerOpTimer -= dt;
+      if(gardenerOpTimer <= 1.0 && gateOpen){
+        // Ferme le portail et remet le cadenas
+        gateOpen = false;
+        gateTargetAngle = 0;
+        updatePadlock();
+      }
+      if(gardenerOpTimer <= 0){
+        armLGroup.rotation.x=0; armLGroup.rotation.z=0;
+        armRGroup.rotation.x=0; armRGroup.rotation.z=0;
+        gardenerCloseAction = false;
+        gardenerState='returning';
+      }
+    }
+    else if(gardenerState==='returning'){
+      const dx=GARDENER_POST.x-gardener.position.x, dz=GARDENER_POST.z-gardener.position.z;
+      const dist=Math.sqrt(dx*dx+dz*dz);
+      if(dist>0.15){
+        gardener.position.x+=(dx/dist)*1.6*dt;
+        gardener.position.z+=(dz/dist)*1.6*dt;
+        gardener.rotation.y=Math.atan2(dx,dz);
+        gardenerWalkT+=dt*5;
+        const sw=Math.sin(gardenerWalkT)*0.45;
+        legLGroup.rotation.x=sw; legRGroup.rotation.x=-sw;
+        armLGroup.rotation.x=-sw*0.6; armRGroup.rotation.x=sw*0.6;
+      } else {
+        gardener.position.set(GARDENER_POST.x,0,GARDENER_POST.z);
+        legLGroup.rotation.x=0; legRGroup.rotation.x=0;
+        armLGroup.rotation.x=0; armRGroup.rotation.x=0;
+        gardener.rotation.y=Math.PI;
+        gardenerState='idle'; gardenerActivityTimer=8+Math.random()*6;
+      }
+    }
+    else if(gardenerState==='raking'){
+      // Animation râteler : balancement avant/arrière des bras + légère flexion
+      gardenerActivityTimer+=dt;
+      const rk=Math.sin(gardenerActivityTimer*2.0)*0.55;
+      armLGroup.rotation.x=rk; armRGroup.rotation.x=rk;
+      torsoGroup.rotation.x=Math.sin(gardenerActivityTimer*2.0)*0.08;
+      // Avancer légèrement et reculer
+      gardener.position.z = GARDENER_RAKE1.z + Math.sin(gardenerActivityTimer*0.5)*0.3;
+      if(gardenerActivityTimer>10){
+        torsoGroup.rotation.x=0;
+        gardenerState='returning'; gardenerActivity='watering';
+        canGroup.position.set(GARDENER_WATER1.x+0.8, 0, GARDENER_WATER1.z);
+      }
+    }
+    else if(gardenerState==='watering'){
+      // Animation arrosage : bras avant incliné, oscillation douce
+      gardenerActivityTimer+=dt;
+      armRGroup.rotation.x=-0.9; armRGroup.rotation.z=-0.15;
+      armLGroup.rotation.x=-0.5;
+      torsoGroup.rotation.x=0.12+Math.sin(gardenerActivityTimer*0.8)*0.05;
+      canGroup.position.set(
+        gardener.position.x+Math.cos(gardener.rotation.y+0.3)*0.7,
+        0.5,
+        gardener.position.z+Math.sin(gardener.rotation.y+0.3)*0.7
+      );
+      if(gardenerActivityTimer>8){
+        torsoGroup.rotation.x=0;
+        armRGroup.rotation.x=0; armRGroup.rotation.z=0; armLGroup.rotation.x=0;
+        canGroup.position.set(11.5,0,14.5);
+        gardenerState='returning'; gardenerActivity='raking';
+      }
+    }
+    else { // idle
+      // Balancement subtil, regarde autour
+      const idleT=ts*0.001;
+      headGroup.rotation.y=Math.sin(idleT*0.7)*0.3;
+      torsoGroup.rotation.y=Math.sin(idleT*0.4)*0.05;
+      armLGroup.rotation.z=Math.sin(idleT*0.6)*0.08;
+      armRGroup.rotation.z=-Math.sin(idleT*0.6)*0.08;
+      gardenerActivityTimer-=dt;
+      if(gardenerActivityTimer<=0){
+        headGroup.rotation.y=0;
+        gardenerState='walking';
+        gardenerActivity = Math.random()<0.5 ? 'raking' : 'watering';
+        gardener.position.set(GARDENER_POST.x,0,GARDENER_POST.z);
+      }
+    }
+  }
+
+  // ─── JARDINIER : proximité & bulle dialogue ──────────────────
+  {
+    const gx=gardener.position.x-camera.position.x, gz=gardener.position.z-camera.position.z;
+    const gdist=Math.sqrt(gx*gx+gz*gz);
+    nearGardener = gdist < 4.5;
+    talkBubble.style.display = (nearGardener && !inDialogue) ? 'block' : 'none';
+    // Le jardinier se tourne vers le joueur quand on est tout proche (et pas en activité)
+    if(gdist < 3.0 && (gardenerState==='idle'||gardenerState==='raking'||gardenerState==='watering')){
+      gardener.rotation.y = Math.atan2(camera.position.x-gardener.position.x, camera.position.z-gardener.position.z);
+    }
+  }
+
+  // Bouton main
+  if(nearDoor !== activeDoor){
+    activeDoor = nearDoor;
+    handBtn.style.display = nearDoor ? 'block' : 'none';
+    if(nearDoor) handBtn.innerHTML = nearDoor.open ? '🚪' : '🖐️';
+  }
+
+  // ─── MODE VOL : montée / descente ───────────────────────────
+  if(flyMode){
+    if(keys[' '] || keys['e']) camera.position.y += flySpeed * dt;
+    if(keys['c'] || keys['x']) camera.position.y -= flySpeed * dt;
+    camera.position.y = Math.max(0.5, Math.min(80, camera.position.y));
+    // En vol, pas de contrainte Y fixe → on met à jour la direction de regard
+    const dirFly = new THREE.Vector3(
+      Math.sin(camYaw)*Math.cos(camPitch),
+      -Math.sin(camPitch),
+      Math.cos(camYaw)*Math.cos(camPitch)
+    );
+    camera.lookAt(camera.position.clone().add(dirFly));
+  }
+
+  // ─── MISE À JOUR COORDONNÉES & CARTE ────────────────────────
+  updateCoordDisplay();
+  drawMinimap();
+
+drawClock();
+  renderer.render(scene,camera);
+  drawJoy('jL',jLx,jLy);
+  drawJoy('jR',jRx,jRy);
+  requestAnimationFrame(loop);
+}
+
+// ═══════════════════════════════════════════════════════
+// ─── FONCTIONNALITÉS : COORDONNÉES / CARTE / VOL ──────
+// ═══════════════════════════════════════════════════════
+
+let showCoords = false;
+let showMap    = false;
+let flyMode    = false;
+let flySpeed   = 8;
+
+// ── Toggle Coordonnées ──────────────────────────────────
+function toggleCoords(){
+  showCoords = !showCoords;
+  document.getElementById('coordPanel').style.display = showCoords ? 'block' : 'none';
+  document.getElementById('btnCoords').classList.toggle('active', showCoords);
+}
+
+// ── Toggle Carte ─────────────────────────────────────────
+function toggleMap(){
+  showMap = !showMap;
+  document.getElementById('minimap').style.display = showMap ? 'block' : 'none';
+  document.getElementById('btnMap').classList.toggle('active', showMap);
+}
+
+// ── Toggle Vol ───────────────────────────────────────────
+function toggleFly(){
+  flyMode = !flyMode;
+  const btn = document.getElementById('btnFly');
+  btn.classList.toggle('active', flyMode);
+  btn.innerHTML = flyMode
+    ? '<span class="icon">🪂</span>Vol ON'
+    : '<span class="icon">🪂</span>Vol';
+  if(!flyMode) camera.position.y = 1.7;
+}
+
+// ── Copier les coordonnées ───────────────────────────────
+function copyCoords(){
+  const x = camera.position.x.toFixed(2);
+  const y = camera.position.y.toFixed(2);
+  const z = camera.position.z.toFixed(2);
+  const txt = `X:${x} Y:${y} Z:${z}`;
+  const doToast = () => {
+    const toast = document.getElementById('toast');
+    toast.textContent = '✓ ' + txt + ' copié !';
+    toast.style.opacity = '1';
+    setTimeout(()=>{ toast.style.opacity='0'; }, 2200);
+    const btn = document.getElementById('copyBtn');
+    btn.textContent = '✓ COPIÉ !'; btn.classList.add('copied');
+    setTimeout(()=>{ btn.textContent='⧉ COPIER'; btn.classList.remove('copied'); }, 2000);
+  };
+  if(navigator.clipboard){
+    navigator.clipboard.writeText(txt).then(doToast).catch(()=>{
+      const el=document.createElement('textarea');
+      el.value=txt; document.body.appendChild(el); el.select();
+      document.execCommand('copy'); document.body.removeChild(el); doToast();
+    });
+  } else {
+    const el=document.createElement('textarea');
+    el.value=txt; document.body.appendChild(el); el.select();
+    document.execCommand('copy'); document.body.removeChild(el); doToast();
+  }
+}
+
+// ── Mise à jour de l'affichage des coordonnées ──────────
+function updateCoordDisplay(){
+  if(!showCoords) return;
+  document.getElementById('cx').textContent = camera.position.x.toFixed(2);
+  document.getElementById('cz').textContent = camera.position.z.toFixed(2);
+  document.getElementById('cy').textContent = camera.position.y.toFixed(2);
+}
+
+// ── Mini-carte ──────────────────────────────────────────
+const MAP_W=180, MAP_H=180;
+const WORLD_X1=-36, WORLD_X2=36, WORLD_Z1=-27, WORLD_Z2=18;
+const WORLD_W=WORLD_X2-WORLD_X1, WORLD_D=WORLD_Z2-WORLD_Z1;
+
+function worldToMap(wx,wz){
+  return [((wx-WORLD_X1)/WORLD_W)*MAP_W, ((wz-WORLD_Z1)/WORLD_D)*MAP_H];
+}
+
+function drawMinimap(){
+  if(!showMap) return;
+  const mc2=document.getElementById('minimapCanvas');
+  const ctx=mc2.getContext('2d');
+  ctx.clearRect(0,0,MAP_W,MAP_H);
+
+  // Fond
+  ctx.fillStyle='#1a1408'; ctx.fillRect(0,0,MAP_W,MAP_H);
+
+  // Cour pavée (zone centrale)
+  ctx.fillStyle='#3a3022';
+  {const[a,b]=worldToMap(-30,-27);const[c,d]=worldToMap(30,18);ctx.fillRect(a,b,c-a,d-b);}
+
+  // Pelouses
+  ctx.fillStyle='#1e4a0e';
+  {const[a,b]=worldToMap(-23.5,-5);const[c,d]=worldToMap(-3,16);ctx.fillRect(a,b,c-a,d-b);}
+  {const[a,b]=worldToMap(3,-5);const[c,d]=worldToMap(23.5,16);ctx.fillRect(a,b,c-a,d-b);}
+
+  // Bâtiment principal
+  ctx.fillStyle='#80704a';
+  {const[a,b]=worldToMap(-27,-27.5);const[c,d]=worldToMap(27,-20.5);ctx.fillRect(a,b,c-a,d-b);}
+
+  // Bâtiments latéraux
+  ctx.fillStyle='#706040';
+  {const[a,b]=worldToMap(24,-27);const[c,d]=worldToMap(31,18);ctx.fillRect(a,b,c-a,d-b);}
+  {const[a,b]=worldToMap(-31,-27);const[c,d]=worldToMap(-24,18);ctx.fillRect(a,b,c-a,d-b);}
+
+  // Portail (ligne dorée en bas)
+  ctx.strokeStyle='#d4a020'; ctx.lineWidth=2;
+  {const[a,b]=worldToMap(-8,18);const[c,d]=worldToMap(8,18);ctx.beginPath();ctx.moveTo(a,b);ctx.lineTo(c,d);ctx.stroke();}
+
+  // Grille fine
+  ctx.strokeStyle='rgba(120,100,60,0.12)'; ctx.lineWidth=0.5;
+  for(let gx=-36;gx<=36;gx+=9){const[mx]=worldToMap(gx,0);ctx.beginPath();ctx.moveTo(mx,0);ctx.lineTo(mx,MAP_H);ctx.stroke();}
+  for(let gz=-27;gz<=18;gz+=9){const[,mz]=worldToMap(0,gz);ctx.beginPath();ctx.moveTo(0,mz);ctx.lineTo(MAP_W,mz);ctx.stroke();}
+
+  // Bordure
+  ctx.strokeStyle='#6a5020'; ctx.lineWidth=1.5; ctx.strokeRect(1,1,MAP_W-2,MAP_H-2);
+
+  // Jardinier (cercle bleu)
+  const gp=gardener.position;
+  const[gjx,gjz]=worldToMap(gp.x,gp.z);
+  ctx.fillStyle='#40b0ff'; ctx.beginPath(); ctx.arc(gjx,gjz,3.5,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#80d0ff'; ctx.lineWidth=1; ctx.stroke();
+
+  // Joueur (triangle rouge orienté)
+  const[ppx,ppz]=worldToMap(camera.position.x,camera.position.z);
+  ctx.save();
+  ctx.translate(ppx,ppz);
+  ctx.rotate(camYaw+Math.PI);
+  ctx.fillStyle='#ff5020';
+  ctx.beginPath(); ctx.moveTo(0,-8); ctx.lineTo(-5,5); ctx.lineTo(5,5); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='#ff8060'; ctx.lineWidth=1; ctx.stroke();
+  ctx.restore();
+
+  // Légende
+  ctx.font='8px Courier New';
+  ctx.fillStyle='#40b0ff'; ctx.beginPath(); ctx.arc(8,MAP_H-22,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#aaa'; ctx.fillText('Jardinier',15,MAP_H-18);
+  ctx.fillStyle='#ff5020';
+  ctx.beginPath(); ctx.moveTo(8,MAP_H-10); ctx.lineTo(5,MAP_H-2); ctx.lineTo(11,MAP_H-2); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#aaa'; ctx.fillText('Vous',15,MAP_H-4);
+}
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
