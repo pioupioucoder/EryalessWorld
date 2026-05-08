@@ -447,7 +447,20 @@ function drawClock(){
   clockTex.needsUpdate = true;
 }
 
-// (horloge supprimée avec la porte principale)
+// ─── HORLOGE sur le mur extérieur au-dessus de la porte principale ───
+{
+  const clockGeo = new THREE.CircleGeometry(1.1, 64);
+  const clockMesh = new THREE.Mesh(clockGeo, new THREE.MeshBasicMaterial({map: clockTex}));
+  clockMesh.position.set(0, 8.0, -19.0); // plus bas, écarté du mur
+  scene.add(clockMesh);
+
+  // Cadre doré autour de l'horloge
+  const frameMat = new THREE.MeshLambertMaterial({color: 0xc8a020});
+  const frameGeo = new THREE.TorusGeometry(1.15, 0.10, 8, 64);
+  const frameMesh = new THREE.Mesh(frameGeo, frameMat);
+  frameMesh.position.set(0, 8.0, -18.95);
+  scene.add(frameMesh);
+}
 // ─── CONSTANTE BÂTIMENTS LATÉRAUX ──────────
 const SLATH = 13.5, SLATW = 7, SLATD = 48, SLATX = 27.5;
 
@@ -2465,7 +2478,7 @@ handBtn.addEventListener('touchstart', e=>{ e.preventDefault(); handBtn.click();
 // ══════════════════════════════════════════════════════════════
 
 // ⚠️  METS TA CLÉ API GROQ ICI ↓
-const GROQ_API_KEY = "REMOVED";
+const GROQ_API_KEY = "METS_TA_CLE_GROQ_ICI";
 
 // Mémoire persistante (localStorage)
 const MEMORY_KEY = 'surveillant_memory';
@@ -3254,6 +3267,71 @@ function drawJoy(id,dx,dy){
     const bWire = new THREE.Mesh(new THREE.CylinderGeometry(0.01,0.01,0.6,4), new THREE.MeshLambertMaterial({color:0x222222}));
     bWire.position.set(lx, bCeilY - 0.12, bCZ); scene.add(bWire);
   });
+}
+
+
+// ─── TOIT DU 1er ÉTAGE ──────────────────────────────
+{
+  const Y  = 10;
+  const pH = 3.5; // hauteur du faîtage
+  const mPente = new THREE.MeshLambertMaterial({color:0x1a2540, side:THREE.DoubleSide});
+  const mDalle = new THREE.MeshLambertMaterial({color:0x888e94});
+
+  // Fonction qui crée un prisme triangulaire (vrai toit en pente)
+  // w=largeur totale, d=profondeur, h=hauteur faîtage, cx,cy,cz=centre base
+  function makePrism(w, d, h, mat, cx, cy, cz) {
+    const hw = w/2, hd = d/2;
+    const verts = new Float32Array([
+      // Face avant (triangle Z+)
+      -hw, 0,  hd,
+       hw, 0,  hd,
+        0, h,  hd,
+      // Face arrière (triangle Z-)
+      -hw, 0, -hd,
+       hw, 0, -hd,
+        0, h, -hd,
+      // Pente gauche
+      -hw, 0, -hd,
+      -hw, 0,  hd,
+        0, h,  hd,
+        0, h, -hd,
+      // Pente droite
+       hw, 0,  hd,
+       hw, 0, -hd,
+        0, h, -hd,
+        0, h,  hd,
+      // Base gauche
+      -hw, 0, -hd,
+      -hw, 0,  hd,
+        0, h,  hd,
+        0, h, -hd,
+    ]);
+    const idx = [
+      0,1,2,           // avant
+      3,5,4,           // arrière
+      6,7,8, 6,8,9,    // pente gauche
+      10,11,12, 10,12,13, // pente droite
+    ];
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(cx, cy, cz);
+    m.castShadow = true;
+    scene.add(m);
+  }
+
+  // Dalle + toit — 3 zones séparées, PAS la cour centrale
+  // Bras gauche X=-36→-24
+  box(12, 0.2, 45, mDalle, -30, Y+0.05, (-27+18)/2);
+  makePrism(12, 45, pH, mPente, -30, Y, (-27+18)/2);
+  // Bras droit X=+24→+36
+  box(12, 0.2, 45, mDalle,  30, Y+0.05, (-27+18)/2);
+  makePrism(12, 45, pH, mPente,  30, Y, (-27+18)/2);
+  // Bâtiment principal X=-24→+24, Z=-35.5→-19.5
+  box(48, 0.2, 16, mDalle, 0, Y+0.05, (-35.5-19.5)/2);
+  makePrism(48, 16, pH, mPente, 0, Y, (-35.5-19.5)/2);
 }
 
 // Porte Bibliothèque : dans mur Z=-27, X=0, 1er étage (yOffset=5)
