@@ -531,11 +531,11 @@ const S = 1.85; // facteur d'échelle : environ 1.85× les valeurs de base
 const mSkin   = new THREE.MeshLambertMaterial({color:0xd4956a});
 const mSkin2  = new THREE.MeshLambertMaterial({color:0xc88050});
 const mHair   = new THREE.MeshLambertMaterial({color:0x3a2010});
-const mShirt  = new THREE.MeshLambertMaterial({color:0x4a7a30});
-const mPants  = new THREE.MeshLambertMaterial({color:0x3a3050});
+const mShirt  = new THREE.MeshLambertMaterial({color:0x1a2a5a}); // uniforme bleu marine
+const mPants  = new THREE.MeshLambertMaterial({color:0x111120}); // pantalon noir
 const mBoots  = new THREE.MeshLambertMaterial({color:0x1a1008});
-const mHatM   = new THREE.MeshLambertMaterial({color:0x9a7220});
-const mHatBrimM = new THREE.MeshLambertMaterial({color:0xb08a30});
+const mHatM   = new THREE.MeshLambertMaterial({color:0x1a2a5a}); // casquette bleue
+const mHatBrimM = new THREE.MeshLambertMaterial({color:0x0a1a3a}); // visière noire
 const mBelt   = new THREE.MeshLambertMaterial({color:0x2a1a08});
 const mOutil  = new THREE.MeshLambertMaterial({color:0x7a5c30});
 const mMetalTool = new THREE.MeshLambertMaterial({color:0x666666});
@@ -612,12 +612,12 @@ ms(headGroup, 0.035*S, mSkin2, 0, -0.04*S, 0.155*S);
 // Cheveux
 mb(headGroup, 0.34*S,0.10*S,0.32*S, mHair, 0, 0.19*S, -0.02*S);
 mb(headGroup, 0.34*S,0.24*S,0.08*S, mHair, 0, 0.08*S, -0.16*S); // arrière tête
-// Moustache
-mb(headGroup, 0.14*S,0.025*S,0.04*S, new THREE.MeshLambertMaterial({color:0x3a2010}), 0,-0.07*S,0.158*S);
+// Pas de moustache (surveillant)
 // Chapeau de paille
-mc(headGroup, 0.38*S,0.38*S,0.04*S,16, mHatBrimM, 0, 0.27*S, 0); // bord large
-mc(headGroup, 0.18*S,0.21*S,0.22*S,12, mHatM, 0, 0.37*S, 0);     // calotte
-mb(headGroup, 0.04*S,0.06*S,0.38*S, new THREE.MeshLambertMaterial({color:0xc84020}), 0, 0.29*S, 0); // ruban rouge
+// Casquette surveillant
+mb(headGroup, 0.34*S,0.14*S,0.34*S, mHatM, 0, 0.30*S, 0);          // calotte plate
+mb(headGroup, 0.36*S,0.04*S,0.18*S, mHatBrimM, 0, 0.24*S, 0.12*S); // visière avant
+mb(headGroup, 0.10*S,0.03*S,0.04*S, new THREE.MeshLambertMaterial({color:0xd4a010}), 0, 0.32*S, 0.18*S); // insigne doré
 
 // ── BRAS GAUCHE (pivot à l'épaule) ──
 const armLGroup = new THREE.Group();
@@ -674,15 +674,15 @@ ms(legRGroup, 0.11*S, mPants, 0,-0.50*S,0);
 mb(legRGroup, 0.22*S,0.16*S,0.32*S, mBoots, 0,-0.98*S, 0.04*S);
 mb(legRGroup, 0.20*S,0.06*S,0.10*S, mBoots, 0,-1.04*S, 0.16*S);
 
-// ── OUTIL : râteau (dans la main droite) ──
+// ── OUTIL : walkie-talkie (dans la main droite) ──
 const toolGroup = new THREE.Group();
-toolGroup.position.set(0.30*S, -0.05*S, 0); // attaché au torse côté droit
-gardener.add(toolGroup);
-// Manche
-mc(toolGroup, 0.025*S,0.025*S,2.0*S,6, mOutil, 0, 0.10*S, 0.20*S, 0.3, 0.15);
-// Tête râteau
-mb(toolGroup, 0.40*S,0.04*S,0.04*S, mMetalTool, 0.18*S, 0.76*S, 0.50*S);
-for(let d=0;d<6;d++) mb(toolGroup, 0.02*S,0.10*S,0.02*S, mMetalTool, (-0.10+d*0.04)*S, 0.71*S, 0.50*S);
+toolGroup.position.set(0.28*S, -0.55*S, 0.08*S);
+torsoGroup.add(toolGroup);
+const mWalkie = new THREE.MeshLambertMaterial({color:0x111111});
+const mWalkieBtn = new THREE.MeshLambertMaterial({color:0xcc2020});
+mb(toolGroup, 0.09*S,0.22*S,0.05*S, mWalkie, 0,0,0);           // corps
+mc(toolGroup, 0.01*S,0.01*S,0.12*S,6, mMetalTool, 0,0.16*S,0); // antenne
+mb(toolGroup, 0.04*S,0.04*S,0.06*S, mWalkieBtn, 0,0.04*S,0.03*S); // bouton rouge
 
 // ── CLÉ (accrochée à la ceinture) ──
 const keyGroup = new THREE.Group();
@@ -694,15 +694,16 @@ mc(keyGroup, 0.055*S,0.055*S,0.015*S,8, new THREE.MeshLambertMaterial({color:0xa
 mb(keyGroup, 0.015*S,0.04*S,0.015*S, mKeyCol, 0.06*S,-0.025*S,0);
 mb(keyGroup, 0.015*S,0.03*S,0.015*S, mKeyCol, 0.04*S,-0.040*S,0);
 
-// ── ARROSOIR (posé au sol près du jardinier) ──
-const canGroup = new THREE.Group();
-canGroup.position.set(11.5, 0, 14.5);
+// ── SIFFLET (à la ceinture du surveillant) ──
+const canGroup = new THREE.Group(); // gardé pour compatibilité animations
+canGroup.position.set(0,0,0);
 scene.add(canGroup);
-const mCan = new THREE.MeshLambertMaterial({color:0x2a6a80});
-mb(canGroup, 0.30,0.22,0.18, mCan, 0,0.11,0);
-mc(canGroup, 0.04,0.04,0.30,8, mCan, -0.15,0.20,0, 0,0.4);  // bec
-mc(canGroup, 0.035,0.035,0.30,8, mCan, 0,0.28,0,0,0);         // anse
-mc(canGroup, 0.055,0.055,0.025,8, mCan, -0.43,0.20,0,Math.PI/2,0); // tête arrosoir
+// Sifflet doré accroché à la ceinture
+const mSifflet = new THREE.MeshLambertMaterial({color:0xd4a010});
+const siffletGroup = new THREE.Group();
+siffletGroup.position.set(0.18*S, -0.30*S, 0.16*S);
+torsoGroup.add(siffletGroup);
+mc(siffletGroup, 0.025*S,0.025*S,0.12*S,8, mSifflet, 0,0,0, 0,Math.PI/2);
 
 // ─── LOGIQUE JARDINIER ─────────────────────────────────────────
 let gardenerWalkT = 0;
@@ -2460,68 +2461,125 @@ handBtn.addEventListener('touchstart', e=>{ e.preventDefault(); handBtn.click();
 
 
 // ══════════════════════════════════════════════════════════════
-// ─── SYSTÈME DE DIALOGUE avec le jardinier ────────────────────
+// ─── SURVEILLANT IA (Groq) ────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
 
-// CSS bulle de pensée
-const bubbleStyle = document.createElement('style');
-bubbleStyle.textContent = `
-  #dialogueBox {
-    display:none; position:fixed; bottom:110px; left:50%; transform:translateX(-50%);
-    width:min(440px,88vw); background:#fffdf4;
-    border:2.5px solid #c8a830; border-radius:28px;
-    padding:18px 22px 14px; z-index:30;
-    font-family:Georgia,serif; color:#2a1a08;
-    box-shadow:0 6px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,220,0.8);
-  }
-  #dialogueBox::before {
-    content:''; position:absolute; bottom:-22px; left:56px;
-    width:0; height:0;
-    border-left:15px solid transparent; border-right:10px solid transparent;
-    border-top:22px solid #c8a830;
-  }
-  #dialogueBox::after {
-    content:''; position:absolute; bottom:-18px; left:58px;
-    width:0; height:0;
-    border-left:13px solid transparent; border-right:8px solid transparent;
-    border-top:18px solid #fffdf4;
-  }
-  #bubbleDot1,#bubbleDot2,#bubbleDot3 {
-    position:fixed; border-radius:50%; background:#fffdf4;
-    border:2px solid #c8a830; z-index:30; pointer-events:none;
-  }
-  .dlg-btn {
-    background:linear-gradient(135deg,#f5e8c0,#ede0a8);
-    border:1.5px solid #b8920a; border-radius:20px;
-    padding:7px 14px; color:#2a1a08;
-    font-family:Georgia,serif; font-size:12px; cursor:pointer;
-    box-shadow:0 2px 6px rgba(0,0,0,0.15); transition:0.15s;
-  }
-  .dlg-btn:hover { background:linear-gradient(135deg,#ffe090,#d4a800); transform:translateY(-1px); }
-`;
-document.head.appendChild(bubbleStyle);
+// ⚠️  METS TA CLÉ API GROQ ICI ↓
+const GROQ_API_KEY = "REMOVED";
 
-const dialogueBox = document.createElement('div');
-dialogueBox.id='dialogueBox';
-document.body.appendChild(dialogueBox);
+// Mémoire persistante (localStorage)
+const MEMORY_KEY = 'surveillant_memory';
+function loadMemory(){ try{ return JSON.parse(localStorage.getItem(MEMORY_KEY)||'[]'); }catch(e){ return []; } }
+function saveMemory(msgs){ try{ localStorage.setItem(MEMORY_KEY, JSON.stringify(msgs.slice(-40))); }catch(e){} }
+let conversationHistory = loadMemory();
 
-// Petits cercles de queue de bulle
-const dot1=document.createElement('div'); dot1.id='bubbleDot1';
-const dot2=document.createElement('div'); dot2.id='bubbleDot2';
-const dot3=document.createElement('div'); dot3.id='bubbleDot3';
-[dot1,dot2,dot3].forEach(d=>{d.style.display='none'; document.body.appendChild(d);});
-function showBubbleDots(show){
-  if(!show){[dot1,dot2,dot3].forEach(d=>d.style.display='none'); return;}
-  const box=dialogueBox.getBoundingClientRect();
-  const bx=box.left+68, by=box.bottom;
-  [[dot1,10,6,0],[dot2,7,14,5],[dot3,5,21,9]].forEach(([d,sz,oy,ox])=>{
-    d.style.display='block';
-    d.style.width=sz+'px'; d.style.height=sz+'px';
-    d.style.left=(bx+ox-sz/2)+'px'; d.style.top=(by+oy)+'px';
-  });
+// Contexte monde transmis à l'IA
+function getWorldContext(){
+  const now = new Date();
+  const h = now.getHours(), m = now.getMinutes();
+  const timeStr = `${h}h${m<10?'0'+m:m}`;
+  const px = camera.position.x.toFixed(1), pz = camera.position.z.toFixed(1);
+  const etage = camera.position.y > 4.5 ? "1er étage" : "rez-de-chaussée";
+  const portailStatus = gateOpen ? "ouvert" : "fermé et cadenassé";
+  return `Tu es M. Bernard, surveillant du Lycée Jean Dumont. Tu connais parfaitement les lieux.
+Informations en temps réel :
+- Heure actuelle : ${timeStr}
+- L'élève se trouve à la position X:${px} Z:${pz} (${etage})
+- Le portail principal est actuellement : ${portailStatus}
+- Le lycée a : une cour centrale pavée, des pelouses, 2 bâtiments latéraux, un bâtiment principal avec bibliothèque, des salles de classe au 1er étage (5ème A, 5ème B, etc.)
+- Tu peux ouvrir/fermer le portail si l'élève te le demande (réponds alors EXACTEMENT par "ACTION:OUVRIR_PORTAIL" ou "ACTION:FERMER_PORTAIL" en fin de message)
+Règles : Tu parles français, tu es sérieux mais bienveillant, tu connais tous les élèves et professeurs. Réponses courtes (2-3 phrases max).`;
 }
 
-// Bulle "Parler" au-dessus du jardinier (visible quand proche)
+// CSS chat style MP
+const chatStyle = document.createElement('style');
+chatStyle.textContent = `
+  #chatPanel {
+    display:none; position:fixed; bottom:80px; left:50%; transform:translateX(-50%);
+    width:min(420px,92vw); background:#1a1510; border:1.5px solid #c8a830;
+    border-radius:16px; z-index:30; font-family:Georgia,serif;
+    box-shadow:0 8px 40px rgba(0,0,0,0.6); overflow:hidden;
+  }
+  #chatHeader {
+    background:linear-gradient(135deg,#2a1e08,#3a2a10);
+    padding:10px 16px; display:flex; align-items:center; gap:10px;
+    border-bottom:1px solid #4a3a18;
+  }
+  #chatHeader .avatar { font-size:22px; }
+  #chatHeader .name { color:#f0d080; font-size:13px; font-weight:bold; letter-spacing:0.5px; }
+  #chatHeader .role { color:#9a7030; font-size:10px; font-style:italic; }
+  #chatHeader .close-btn {
+    margin-left:auto; background:none; border:none; color:#9a7030;
+    font-size:16px; cursor:pointer; padding:2px 6px; border-radius:4px;
+    transition:0.15s;
+  }
+  #chatHeader .close-btn:hover { color:#f0d080; background:rgba(255,200,0,0.1); }
+  #chatMessages {
+    height:220px; overflow-y:auto; padding:12px 14px;
+    display:flex; flex-direction:column; gap:8px;
+    scrollbar-width:thin; scrollbar-color:#4a3a18 #1a1510;
+  }
+  .msg-npc {
+    align-self:flex-start; max-width:80%;
+    background:#2a2010; border:1px solid #4a3820; border-radius:0 12px 12px 12px;
+    padding:8px 12px; color:#f0e8c8; font-size:12.5px; line-height:1.6;
+  }
+  .msg-player {
+    align-self:flex-end; max-width:80%;
+    background:#1a3010; border:1px solid #2a5020; border-radius:12px 0 12px 12px;
+    padding:8px 12px; color:#c0e8a0; font-size:12.5px; line-height:1.6;
+  }
+  .msg-typing {
+    align-self:flex-start; color:#9a7030; font-size:11px; font-style:italic; padding:4px 8px;
+  }
+  #chatInputRow {
+    display:flex; gap:8px; padding:10px 12px;
+    border-top:1px solid #3a2a10; background:#141008;
+  }
+  #chatInput {
+    flex:1; background:#2a1e08; border:1px solid #4a3818; border-radius:20px;
+    padding:7px 14px; color:#f0e8c8; font-family:Georgia,serif; font-size:12px;
+    outline:none; transition:border-color 0.2s;
+  }
+  #chatInput:focus { border-color:#c8a830; }
+  #chatInput::placeholder { color:#6a5030; }
+  #chatSend {
+    background:linear-gradient(135deg,#c8a020,#a07808); border:none;
+    border-radius:20px; padding:7px 16px; color:#1a1008;
+    font-family:Georgia,serif; font-size:12px; font-weight:bold;
+    cursor:pointer; transition:0.15s; white-space:nowrap;
+  }
+  #chatSend:hover { background:linear-gradient(135deg,#e0b830,#c09010); }
+  #chatSend:disabled { opacity:0.4; cursor:not-allowed; }
+  #chatMemoryNote {
+    text-align:center; font-size:9px; color:#5a4820; padding:4px;
+    font-family:'Courier New',monospace; letter-spacing:0.5px;
+  }
+`;
+document.head.appendChild(chatStyle);
+
+// Créer le panel de chat
+const chatPanel = document.createElement('div');
+chatPanel.id = 'chatPanel';
+chatPanel.innerHTML = `
+  <div id="chatHeader">
+    <span class="avatar">👮</span>
+    <div>
+      <div class="name">M. Bernard</div>
+      <div class="role">Surveillant — Lycée Jean Dumont</div>
+    </div>
+    <button class="close-btn" onclick="closeChat()">✕</button>
+  </div>
+  <div id="chatMessages"></div>
+  <div id="chatMemoryNote">💾 Mémoire activée · ${conversationHistory.length > 0 ? conversationHistory.length/2|0 + ' échanges mémorisés' : 'Nouvelle conversation'}</div>
+  <div id="chatInputRow">
+    <input id="chatInput" placeholder="Écrire un message…" maxlength="200" />
+    <button id="chatSend" onclick="sendMessage()">Envoyer</button>
+  </div>
+`;
+document.body.appendChild(chatPanel);
+
+// Bulle "Parler" au-dessus du surveillant
 const talkBubble = document.createElement('div');
 talkBubble.style.cssText=`
   display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
@@ -2529,136 +2587,135 @@ talkBubble.style.cssText=`
   padding:6px 14px; color:#fff; font-family:Georgia,serif; font-size:13px;
   pointer-events:none; z-index:25;
 `;
-talkBubble.textContent='[E] Parler au jardinier';
+talkBubble.textContent='[E] Parler au surveillant';
 document.body.appendChild(talkBubble);
 
 let inDialogue = false;
 let nearGardener = false;
-let dialoguePhase = 0; // 0=greeting, 1=menu, 2=key_ask, 3=key_answer, 4=bye
 
-const DIALOGUE_GREETINGS = [
-  "Bonjour ! Je m'appelle Marcel, je suis le jardinier du lycée. Vous avez besoin de quelque chose ?",
-  "Ah, bonjour ! Belle journée pour jardiner, non ? Je m'occupe de la cour depuis 12 ans !",
-  "Bonjour bonjour ! J'étais justement en train d'arroser les fleurs. Que puis-je pour vous ?"
-];
-let greetIdx = 0;
+function addMessage(text, role){
+  const msgs = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = role === 'npc' ? 'msg-npc' : 'msg-player';
+  div.textContent = text;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
 
-function showDialogue(html, choices){
-  dialogueBox.style.display='block';
-  inDialogue=true;
-  let choiceHTML='';
-  if(choices){
-    choiceHTML='<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;">';
-    choices.forEach((c,i)=>{
-      choiceHTML+=`<button class="dlg-btn" onclick="dialogueChoice(${i})">${c.label}</button>`;
+function showTyping(){
+  const msgs = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = 'msg-typing'; div.id = 'typingIndicator';
+  div.textContent = 'M. Bernard écrit…';
+  msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight;
+}
+function hideTyping(){ const t = document.getElementById('typingIndicator'); if(t) t.remove(); }
+
+function openChat(){
+  chatPanel.style.display = 'block';
+  inDialogue = true;
+  const msgs = document.getElementById('chatMessages');
+  // Recharger l'historique visuel si vide
+  if(msgs.children.length === 0){
+    if(conversationHistory.length > 0){
+      conversationHistory.forEach(m => {
+        if(m.role === 'assistant') addMessage(m.content, 'npc');
+        else if(m.role === 'user') addMessage(m.content, 'player');
+      });
+    } else {
+      // Premier contact
+      const greeting = "Bonjour ! Je suis M. Bernard, le surveillant. Que puis-je faire pour vous ?";
+      addMessage(greeting, 'npc');
+      conversationHistory.push({role:'assistant', content: greeting});
+      saveMemory(conversationHistory);
+    }
+  }
+  setTimeout(()=>{ document.getElementById('chatInput').focus(); }, 100);
+}
+
+function closeChat(){
+  chatPanel.style.display = 'none';
+  inDialogue = false;
+}
+
+async function sendMessage(){
+  const input = document.getElementById('chatInput');
+  const btn = document.getElementById('chatSend');
+  const text = input.value.trim();
+  if(!text) return;
+
+  addMessage(text, 'player');
+  conversationHistory.push({role:'user', content: text});
+  input.value = '';
+  btn.disabled = true;
+  showTyping();
+
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GROQ_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'llama3-8b-8192',
+        messages: [
+          { role: 'system', content: getWorldContext() },
+          ...conversationHistory
+        ],
+        max_tokens: 150,
+        temperature: 0.7
+      })
     });
-    choiceHTML+='</div>';
-    window._dialogueChoices=choices;
+
+    const data = await response.json();
+    hideTyping();
+
+    if(data.choices && data.choices[0]){
+      let reply = data.choices[0].message.content.trim();
+
+      // Détecter les actions portail
+      if(reply.includes('ACTION:OUVRIR_PORTAIL')){
+        reply = reply.replace('ACTION:OUVRIR_PORTAIL','').trim();
+        setTimeout(()=>{ if(!gateOpen){ gateOpen=true; gateTargetAngle=1; updatePadlock(); gardenerGateAction=true; gardenerState='walking'; } }, 800);
+      }
+      if(reply.includes('ACTION:FERMER_PORTAIL')){
+        reply = reply.replace('ACTION:FERMER_PORTAIL','').trim();
+        setTimeout(()=>{ if(gateOpen){ gateOpen=false; gateTargetAngle=0; updatePadlock(); gardenerCloseAction=true; gardenerState='walking'; } }, 800);
+      }
+
+      addMessage(reply, 'npc');
+      conversationHistory.push({role:'assistant', content: reply});
+      saveMemory(conversationHistory);
+
+      // Màj note mémoire
+      document.getElementById('chatMemoryNote').textContent =
+        `💾 Mémoire activée · ${conversationHistory.length/2|0} échanges mémorisés`;
+    } else {
+      addMessage("(Je n'ai pas bien entendu… Répétez ?)", 'npc');
+    }
+  } catch(err) {
+    hideTyping();
+    addMessage("(Connexion impossible… Vérifiez votre clé API Groq)", 'npc');
   }
-  dialogueBox.innerHTML=`
-    <div style="display:flex;gap:10px;align-items:flex-start;">
-      <div style="font-size:24px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.2))">🧓</div>
-      <div style="flex:1;">
-        <div style="font-size:10px;color:#9a7010;font-style:italic;margin-bottom:5px;letter-spacing:0.4px;">Marcel — Jardinier</div>
-        <div style="font-size:13px;line-height:1.65;color:#1a1008;">${html}</div>
-        ${choiceHTML}
-      </div>
-    </div>
-    <div style="text-align:right;margin-top:8px;">
-      <span style="font-size:10px;color:#bba050;letter-spacing:0.3px;">[Echap] Fermer</span>
-    </div>
-  `;
-  // Repositionner les cercles après que la bulle est rendue
-  requestAnimationFrame(()=>showBubbleDots(true));
+
+  btn.disabled = false;
+  setTimeout(()=>{ document.getElementById('chatInput').focus(); }, 50);
 }
 
-function closeDialogue(){
-  dialogueBox.style.display='none';
-  showBubbleDots(false);
-  inDialogue=false;
-  dialoguePhase=0;
-}
+// Touche Entrée pour envoyer
+document.getElementById('chatInput').addEventListener('keydown', e=>{
+  if(e.key === 'Enter') sendMessage();
+  e.stopPropagation();
+});
 
-window.dialogueChoice = function(i){
-  const choices = window._dialogueChoices;
-  if(!choices || !choices[i]) return;
-  choices[i].action();
-};
-
-function askForGate(){
-  if(gateOpen){
-    showDialogue('Le portail est déjà ouvert ! Vous pouvez passer librement.', [
-      { label:'Merci !', action:()=>closeDialogue() }
-    ]);
-    return;
-  }
-  showDialogue('Vous souhaitez que j\'ouvre le portail ? J\'ai le trousseau de clés, je vais m\'en occuper.', [
-    { label:'✅ Oui, merci Marcel !', action:()=>{
-      showDialogue('Bien sûr ! Je vais déverrouiller le cadenas tout de suite. Attendez un instant…');
-      setTimeout(()=>{
-        closeDialogue();
-        gardenerGateAction = true;
-        gardenerState = 'walking';
-      }, 1400);
-    }},
-    { label:'❌ Non, finalement non', action:()=>startDialogue() }
-  ]);
-}
-
-function askCloseGate(){
-  if(!gateOpen){
-    showDialogue('Le portail est déjà fermé et bien cadenassé, pas d\'inquiétude !', [
-      { label:'D\'accord, merci.', action:()=>closeDialogue() }
-    ]);
-    return;
-  }
-  showDialogue('Vous voulez que je referme le portail ? Je vais remettre le cadenas doré.', [
-    { label:'✅ Oui, fermez-le !', action:()=>{
-      showDialogue('Entendu ! Je referme et je cadenasse. Un instant…');
-      setTimeout(()=>{
-        closeDialogue();
-        gardenerCloseAction = true;
-        gardenerState = 'walking';
-      }, 1400);
-    }},
-    { label:'❌ Non, laissez ouvert', action:()=>startDialogue() }
-  ]);
-}
-
-function startDialogue(){
-  dialoguePhase=1;
-  const greeting = DIALOGUE_GREETINGS[greetIdx % DIALOGUE_GREETINGS.length];
-  greetIdx++;
-  showDialogue(greeting, [
-    { label:'🔑 Ouvrir le portail', action:()=>askForGate() },
-    { label:'🔒 Fermer le portail', action:()=>askCloseGate() },
-    { label:'🌸 Comment va le jardin ?', action:()=>{
-      const msgs = [
-        'Les rosiers donnent bien cette année ! J\'ai planté de nouvelles fleurs la semaine dernière.',
-        'J\'ai eu du mal avec les mauvaises herbes près du bras gauche, mais ça va mieux.',
-        'Les arbres ont besoin d\'être taillés, mais sinon tout est beau !',
-        'Ce matin j\'ai trouvé un escargot sous le banc. Je l\'ai remis dans la pelouse.'
-      ];
-      showDialogue(msgs[Math.floor(Math.random()*msgs.length)], [
-        { label:'↩ Retour', action:()=>startDialogue() },
-        { label:'Au revoir', action:()=>closeDialogue() }
-      ]);
-    }},
-    { label:'Au revoir', action:()=>{
-      const byes=['Bonne journée !','À tout à l\'heure !','N\'hésitez pas si vous avez besoin !'];
-      showDialogue(byes[Math.floor(Math.random()*byes.length)]);
-      setTimeout(closeDialogue, 1800);
-    }}
-  ]);
-}
-
-// Touche E pour parler
+// Touche E pour ouvrir/fermer
 document.addEventListener('keydown', e=>{
   if(e.key.toLowerCase()==='e'){
-    if(inDialogue){ closeDialogue(); return; }
-    if(nearGardener) startDialogue();
+    if(inDialogue){ closeChat(); return; }
+    if(nearGardener) openChat();
   }
-  if(e.key==='Escape' && inDialogue) closeDialogue();
+  if(e.key==='Escape' && inDialogue) closeChat();
 });
 
 let camYaw=Math.PI, camPitch=0.05;
@@ -3854,7 +3911,7 @@ function loop(ts){
       if(gardenerActivityTimer>10){
         torsoGroup.rotation.x=0;
         gardenerState='returning'; gardenerActivity='watering';
-        canGroup.position.set(GARDENER_WATER1.x+0.8, 0, GARDENER_WATER1.z);
+        // canGroup statique
       }
     }
     else if(gardenerState==='watering'){
@@ -3863,15 +3920,11 @@ function loop(ts){
       armRGroup.rotation.x=-0.9; armRGroup.rotation.z=-0.15;
       armLGroup.rotation.x=-0.5;
       torsoGroup.rotation.x=0.12+Math.sin(gardenerActivityTimer*0.8)*0.05;
-      canGroup.position.set(
-        gardener.position.x+Math.cos(gardener.rotation.y+0.3)*0.7,
-        0.5,
-        gardener.position.z+Math.sin(gardener.rotation.y+0.3)*0.7
-      );
+      // canGroup statique (sifflet)
       if(gardenerActivityTimer>8){
         torsoGroup.rotation.x=0;
         armRGroup.rotation.x=0; armRGroup.rotation.z=0; armLGroup.rotation.x=0;
-        canGroup.position.set(11.5,0,14.5);
+        // canGroup (sifflet, pas d'animation de position)
         gardenerState='returning'; gardenerActivity='raking';
       }
     }
@@ -4057,8 +4110,8 @@ function drawMinimap(){
   // Jardinier (cercle bleu)
   const gp=gardener.position;
   const[gjx,gjz]=worldToMap(gp.x,gp.z);
-  ctx.fillStyle='#40b0ff'; ctx.beginPath(); ctx.arc(gjx,gjz,3.5,0,Math.PI*2); ctx.fill();
-  ctx.strokeStyle='#80d0ff'; ctx.lineWidth=1; ctx.stroke();
+  ctx.fillStyle='#d08020'; ctx.beginPath(); ctx.arc(gjx,gjz,3.5,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#f0a030'; ctx.lineWidth=1; ctx.stroke();
 
   // Joueur (triangle rouge orienté)
   const[ppx,ppz]=worldToMap(camera.position.x,camera.position.z);
@@ -4072,8 +4125,8 @@ function drawMinimap(){
 
   // Légende
   ctx.font='8px Courier New';
-  ctx.fillStyle='#40b0ff'; ctx.beginPath(); ctx.arc(8,MAP_H-22,3,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='#aaa'; ctx.fillText('Jardinier',15,MAP_H-18);
+  ctx.fillStyle='#d08020'; ctx.beginPath(); ctx.arc(8,MAP_H-22,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#aaa'; ctx.fillText('Surveillant',15,MAP_H-18);
   ctx.fillStyle='#ff5020';
   ctx.beginPath(); ctx.moveTo(8,MAP_H-10); ctx.lineTo(5,MAP_H-2); ctx.lineTo(11,MAP_H-2); ctx.closePath(); ctx.fill();
   ctx.fillStyle='#aaa'; ctx.fillText('Vous',15,MAP_H-4);
