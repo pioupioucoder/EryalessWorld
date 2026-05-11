@@ -116,6 +116,7 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; }
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="surveillant_data.js"></script>
 <script>
 const canvas = document.getElementById('gc');
 const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
@@ -2474,253 +2475,216 @@ handBtn.addEventListener('touchstart', e=>{ e.preventDefault(); handBtn.click();
 
 
 // ══════════════════════════════════════════════════════════════
-// ─── SURVEILLANT IA (Groq) ────────────────────────────────────
+// ─── SURVEILLANT LOCAL (sans IA, sans API) ───────────────────
 // ══════════════════════════════════════════════════════════════
 
-// ⚠️  METS TA CLÉ API GROQ ICI ↓
-const GROQ_API_KEY = "REMOVED";
-
-// Mémoire persistante (localStorage)
-const MEMORY_KEY = 'surveillant_memory';
-function loadMemory(){ try{ return JSON.parse(localStorage.getItem(MEMORY_KEY)||'[]'); }catch(e){ return []; } }
-function saveMemory(msgs){ try{ localStorage.setItem(MEMORY_KEY, JSON.stringify(msgs.slice(-40))); }catch(e){} }
-let conversationHistory = loadMemory();
-
-// Contexte monde transmis à l'IA
-function getWorldContext(){
-  const now = new Date();
-  const h = now.getHours(), m = now.getMinutes();
-  const timeStr = `${h}h${m<10?'0'+m:m}`;
-  const px = camera.position.x.toFixed(1), pz = camera.position.z.toFixed(1);
-  const etage = camera.position.y > 4.5 ? "1er étage" : "rez-de-chaussée";
-  const portailStatus = gateOpen ? "ouvert" : "fermé et cadenassé";
-  return `Tu es M. Bernard, surveillant du Lycée Jean Dumont. Tu connais parfaitement les lieux.
-Informations en temps réel :
-- Heure actuelle : ${timeStr}
-- L'élève se trouve à la position X:${px} Z:${pz} (${etage})
-- Le portail principal est actuellement : ${portailStatus}
-- Le lycée a : une cour centrale pavée, des pelouses, 2 bâtiments latéraux, un bâtiment principal avec bibliothèque, des salles de classe au 1er étage (5ème A, 5ème B, etc.)
-- Tu peux ouvrir/fermer le portail si l'élève te le demande (réponds alors EXACTEMENT par "ACTION:OUVRIR_PORTAIL" ou "ACTION:FERMER_PORTAIL" en fin de message)
-Règles : Tu parles français, tu es sérieux mais bienveillant, tu connais tous les élèves et professeurs. Réponses courtes (2-3 phrases max).`;
-}
-
-// CSS chat style MP
-const chatStyle = document.createElement('style');
-chatStyle.textContent = `
-  #chatPanel {
-    display:none; position:fixed; bottom:80px; left:50%; transform:translateX(-50%);
-    width:min(420px,92vw); background:#1a1510; border:1.5px solid #c8a830;
-    border-radius:16px; z-index:30; font-family:Georgia,serif;
-    box-shadow:0 8px 40px rgba(0,0,0,0.6); overflow:hidden;
-  }
-  #chatHeader {
-    background:linear-gradient(135deg,#2a1e08,#3a2a10);
-    padding:10px 16px; display:flex; align-items:center; gap:10px;
-    border-bottom:1px solid #4a3a18;
-  }
-  #chatHeader .avatar { font-size:22px; }
-  #chatHeader .name { color:#f0d080; font-size:13px; font-weight:bold; letter-spacing:0.5px; }
-  #chatHeader .role { color:#9a7030; font-size:10px; font-style:italic; }
-  #chatHeader .close-btn {
-    margin-left:auto; background:none; border:none; color:#9a7030;
-    font-size:16px; cursor:pointer; padding:2px 6px; border-radius:4px;
-    transition:0.15s;
-  }
-  #chatHeader .close-btn:hover { color:#f0d080; background:rgba(255,200,0,0.1); }
-  #chatMessages {
-    height:220px; overflow-y:auto; padding:12px 14px;
-    display:flex; flex-direction:column; gap:8px;
-    scrollbar-width:thin; scrollbar-color:#4a3a18 #1a1510;
-  }
-  .msg-npc {
-    align-self:flex-start; max-width:80%;
-    background:#2a2010; border:1px solid #4a3820; border-radius:0 12px 12px 12px;
-    padding:8px 12px; color:#f0e8c8; font-size:12.5px; line-height:1.6;
-  }
-  .msg-player {
-    align-self:flex-end; max-width:80%;
-    background:#1a3010; border:1px solid #2a5020; border-radius:12px 0 12px 12px;
-    padding:8px 12px; color:#c0e8a0; font-size:12.5px; line-height:1.6;
-  }
-  .msg-typing {
-    align-self:flex-start; color:#9a7030; font-size:11px; font-style:italic; padding:4px 8px;
-  }
-  #chatInputRow {
-    display:flex; gap:8px; padding:10px 12px;
-    border-top:1px solid #3a2a10; background:#141008;
-  }
-  #chatInput {
-    flex:1; background:#2a1e08; border:1px solid #4a3818; border-radius:20px;
-    padding:7px 14px; color:#f0e8c8; font-family:Georgia,serif; font-size:12px;
-    outline:none; transition:border-color 0.2s;
-  }
-  #chatInput:focus { border-color:#c8a830; }
-  #chatInput::placeholder { color:#6a5030; }
-  #chatSend {
-    background:linear-gradient(135deg,#c8a020,#a07808); border:none;
-    border-radius:20px; padding:7px 16px; color:#1a1008;
-    font-family:Georgia,serif; font-size:12px; font-weight:bold;
-    cursor:pointer; transition:0.15s; white-space:nowrap;
-  }
-  #chatSend:hover { background:linear-gradient(135deg,#e0b830,#c09010); }
-  #chatSend:disabled { opacity:0.4; cursor:not-allowed; }
-  #chatMemoryNote {
-    text-align:center; font-size:9px; color:#5a4820; padding:4px;
-    font-family:'Courier New',monospace; letter-spacing:0.5px;
-  }
+// ── BULLE 3D → 2D : projetée au-dessus de la tête ─────────────
+const speechBubble = document.createElement('div');
+speechBubble.id = 'speechBubble';
+speechBubble.style.cssText = `
+  display:none; position:fixed; pointer-events:none; z-index:50;
+  transform:translate(-50%, -100%);
+  max-width:220px; min-width:80px;
+  background:rgba(255,252,240,0.97);
+  border:2px solid #c8a020;
+  border-radius:14px 14px 14px 4px;
+  padding:7px 12px 7px 12px;
+  font-family:Georgia,serif; font-size:12.5px; color:#2a1a08;
+  line-height:1.5; text-align:center;
+  box-shadow:0 4px 18px rgba(0,0,0,0.35);
+  transition: opacity 0.3s;
 `;
-document.head.appendChild(chatStyle);
+// Petite queue de bulle
+speechBubble.innerHTML = '<span id="speechText"></span><div style="position:absolute;bottom:-10px;left:14px;width:0;height:0;border-left:8px solid transparent;border-right:4px solid transparent;border-top:10px solid #c8a020;"></div><div style="position:absolute;bottom:-8px;left:15px;width:0;height:0;border-left:7px solid transparent;border-right:3px solid transparent;border-top:9px solid rgba(255,252,240,0.97);"></div>';
+document.body.appendChild(speechBubble);
 
-// Créer le panel de chat
-const chatPanel = document.createElement('div');
-chatPanel.id = 'chatPanel';
-chatPanel.innerHTML = `
-  <div id="chatHeader">
-    <span class="avatar">👮</span>
-    <div>
-      <div class="name">M. Bernard</div>
-      <div class="role">Surveillant — Lycée Jean Dumont</div>
-    </div>
-    <button class="close-btn" onclick="closeChat()">✕</button>
-  </div>
-  <div id="chatMessages"></div>
-  <div id="chatMemoryNote">💾 Mémoire activée · ${conversationHistory.length > 0 ? conversationHistory.length/2|0 + ' échanges mémorisés' : 'Nouvelle conversation'}</div>
-  <div id="chatInputRow">
-    <input id="chatInput" placeholder="Écrire un message…" maxlength="200" />
-    <button id="chatSend" onclick="sendMessage()">Envoyer</button>
-  </div>
-`;
-document.body.appendChild(chatPanel);
-
-// Bulle "Parler" au-dessus du surveillant
-const talkBubble = document.createElement('div');
-talkBubble.style.cssText=`
+// Bulle "approche" plus petite — au centre de l'écran quand on est près
+const approachBubble = document.createElement('div');
+approachBubble.style.cssText=`
   display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
   background:rgba(0,0,0,0.55); border:1px solid #aaa; border-radius:20px;
   padding:6px 14px; color:#fff; font-family:Georgia,serif; font-size:13px;
   pointer-events:none; z-index:25;
 `;
-talkBubble.textContent='[E] Parler au surveillant';
-document.body.appendChild(talkBubble);
+approachBubble.textContent = SURVEILLANT.repliqueApproche;
+document.body.appendChild(approachBubble);
 
+// ── ÉTAT DU DIALOGUE ──────────────────────────────────────────
 let inDialogue = false;
 let nearGardener = false;
 
-function addMessage(text, role){
-  const msgs = document.getElementById('chatMessages');
-  const div = document.createElement('div');
-  div.className = role === 'npc' ? 'msg-npc' : 'msg-player';
-  div.textContent = text;
-  msgs.appendChild(div);
-  msgs.scrollTop = msgs.scrollHeight;
+// ── RÉPLIQUES AUTOMATIQUES : timer ────────────────────────────
+let autoSpeechTimer = 3.0;      // délai initial
+let autoSpeechDuration = 0;     // combien de temps afficher
+let autoSpeechActive = false;
+const AUTO_SPEECH_INTERVAL_MIN = 8;
+const AUTO_SPEECH_INTERVAL_MAX = 18;
+const AUTO_SPEECH_SHOW_DURATION = 4.5;
+
+function triggerAutoSpeech(){
+  const idx = Math.floor(Math.random() * SURVEILLANT.repliquesAuto.length);
+  const text = SURVEILLANT.repliquesAuto[idx];
+  document.getElementById('speechText').textContent = text;
+  autoSpeechDuration = AUTO_SPEECH_SHOW_DURATION;
+  autoSpeechActive = true;
 }
 
-function showTyping(){
-  const msgs = document.getElementById('chatMessages');
-  const div = document.createElement('div');
-  div.className = 'msg-typing'; div.id = 'typingIndicator';
-  div.textContent = 'M. Bernard écrit…';
-  msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight;
+// Met à jour la position 3D→2D de la bulle chaque frame
+function updateSpeechBubblePosition(){
+  if(!autoSpeechActive){ speechBubble.style.display='none'; return; }
+  // Point au-dessus de la tête du jardinier (y=3.5 en espace monde)
+  const headPos = new THREE.Vector3(
+    gardener.position.x,
+    3.6,   // hauteur tête + un peu au-dessus
+    gardener.position.z
+  );
+  // Projeter en espace écran
+  const projected = headPos.clone().project(camera);
+  // Vérifier si derrière la caméra
+  if(projected.z > 1){ speechBubble.style.display='none'; return; }
+  const W = window.innerWidth;
+  const H = window.innerHeight - 70;
+  const sx = (projected.x  * 0.5 + 0.5) * W;
+  const sy = (-projected.y * 0.5 + 0.5) * H;
+  // Ne pas afficher si trop loin de l'écran
+  if(sx < -60 || sx > W+60 || sy < -80 || sy > H+80){ speechBubble.style.display='none'; return; }
+  speechBubble.style.display = 'block';
+  speechBubble.style.left = sx + 'px';
+  speechBubble.style.top  = sy + 'px';
+  // Échelle selon distance (perspective)
+  const gx=gardener.position.x-camera.position.x, gz=gardener.position.z-camera.position.z;
+  const gdist=Math.sqrt(gx*gx+gz*gz);
+  const sc = Math.max(0.55, Math.min(1.0, 5.0/Math.max(gdist,1)));
+  speechBubble.style.transform = `translate(-50%, -100%) scale(${sc})`;
+  speechBubble.style.transformOrigin = 'bottom left';
 }
-function hideTyping(){ const t = document.getElementById('typingIndicator'); if(t) t.remove(); }
+
+function tickAutoSpeech(dt){
+  if(autoSpeechActive){
+    autoSpeechDuration -= dt;
+    if(autoSpeechDuration <= 0){
+      autoSpeechActive = false;
+      speechBubble.style.display='none';
+      autoSpeechTimer = AUTO_SPEECH_INTERVAL_MIN + Math.random()*(AUTO_SPEECH_INTERVAL_MAX-AUTO_SPEECH_INTERVAL_MIN);
+    }
+  } else {
+    autoSpeechTimer -= dt;
+    if(autoSpeechTimer <= 0) triggerAutoSpeech();
+  }
+  updateSpeechBubblePosition();
+}
+
+// ── PANNEAU DIALOGUE (arbre de conversation) ──────────────────
+const dialogStyle = document.createElement('style');
+dialogStyle.textContent = `
+  #dialogPanel {
+    display:none; position:fixed; bottom:80px; left:50%; transform:translateX(-50%);
+    width:min(400px,92vw); background:#1a1510; border:1.5px solid #c8a830;
+    border-radius:16px; z-index:30; font-family:Georgia,serif;
+    box-shadow:0 8px 40px rgba(0,0,0,0.6); overflow:hidden;
+  }
+  #dialogHeader {
+    background:linear-gradient(135deg,#2a1e08,#3a2a10);
+    padding:10px 16px; display:flex; align-items:center; gap:10px;
+    border-bottom:1px solid #4a3a18;
+  }
+  #dialogHeader .dname { color:#f0d080; font-size:13px; font-weight:bold; }
+  #dialogHeader .drole { color:#9a7030; font-size:10px; font-style:italic; }
+  #dialogHeader .dclose {
+    margin-left:auto; background:none; border:none; color:#9a7030;
+    font-size:16px; cursor:pointer; padding:2px 6px; border-radius:4px;
+  }
+  #dialogHeader .dclose:hover { color:#f0d080; }
+  #dialogNPCText {
+    padding:14px 16px 10px; color:#f0e8c8; font-size:13px; line-height:1.7;
+    min-height:54px; border-bottom:1px solid #2a2010;
+  }
+  #dialogOptions {
+    padding:10px 14px 12px; display:flex; flex-direction:column; gap:6px;
+  }
+  .dopt {
+    background:#2a1e08; border:1px solid #4a3818; border-radius:20px;
+    padding:8px 16px; color:#d4b060; font-family:Georgia,serif; font-size:12px;
+    cursor:pointer; text-align:left; transition:0.15s;
+  }
+  .dopt:hover { background:#3a2a0a; border-color:#c8a020; color:#f0d080; }
+`;
+document.head.appendChild(dialogStyle);
+
+const dialogPanel = document.createElement('div');
+dialogPanel.id = 'dialogPanel';
+dialogPanel.innerHTML = `
+  <div id="dialogHeader">
+    <span style="font-size:22px">👮</span>
+    <div>
+      <div class="dname">M. Bernard</div>
+      <div class="drole">Surveillant — Lycée Jean Dumont</div>
+    </div>
+    <button class="dclose" onclick="closeChat()">✕</button>
+  </div>
+  <div id="dialogNPCText"></div>
+  <div id="dialogOptions"></div>
+`;
+document.body.appendChild(dialogPanel);
+
+// ── LOGIQUE DIALOGUE ──────────────────────────────────────────
+let currentNode = 'accueil';
 
 function openChat(){
-  chatPanel.style.display = 'block';
   inDialogue = true;
-  const msgs = document.getElementById('chatMessages');
-  // Recharger l'historique visuel si vide
-  if(msgs.children.length === 0){
-    if(conversationHistory.length > 0){
-      conversationHistory.forEach(m => {
-        if(m.role === 'assistant') addMessage(m.content, 'npc');
-        else if(m.role === 'user') addMessage(m.content, 'player');
-      });
-    } else {
-      // Premier contact
-      const greeting = "Bonjour ! Je suis M. Bernard, le surveillant. Que puis-je faire pour vous ?";
-      addMessage(greeting, 'npc');
-      conversationHistory.push({role:'assistant', content: greeting});
-      saveMemory(conversationHistory);
-    }
-  }
-  setTimeout(()=>{ document.getElementById('chatInput').focus(); }, 100);
+  dialogPanel.style.display = 'block';
+  approachBubble.style.display = 'none';
+  // Masquer la bulle auto si elle est affichée
+  autoSpeechActive = false; speechBubble.style.display='none';
+  currentNode = 'accueil';
+  renderDialogNode(currentNode);
 }
 
 function closeChat(){
-  chatPanel.style.display = 'none';
   inDialogue = false;
+  dialogPanel.style.display = 'none';
+  // Réinitialiser timer pour prochaine réplique auto
+  autoSpeechTimer = 3 + Math.random()*4;
 }
 
-async function sendMessage(){
-  const input = document.getElementById('chatInput');
-  const btn = document.getElementById('chatSend');
-  const text = input.value.trim();
-  if(!text) return;
+function renderDialogNode(nodeId){
+  const node = SURVEILLANT.dialogues[nodeId];
+  if(!node) { closeChat(); return; }
 
-  addMessage(text, 'player');
-  conversationHistory.push({role:'user', content: text});
-  input.value = '';
-  btn.disabled = true;
-  showTyping();
+  // Afficher le texte du NPC aussi dans la bulle 3D pendant le dialogue
+  document.getElementById('speechText').textContent = node.texte;
+  autoSpeechActive = true; autoSpeechDuration = 999; // reste jusqu'à closeChat
+  updateSpeechBubblePosition();
 
-  try {
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GROQ_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: 'llama3-8b-8192',
-        messages: [
-          { role: 'system', content: getWorldContext() },
-          ...conversationHistory
-        ],
-        max_tokens: 150,
-        temperature: 0.7
-      })
-    });
+  document.getElementById('dialogNPCText').textContent = node.texte;
 
-    const data = await response.json();
-    hideTyping();
-
-    if(data.choices && data.choices[0]){
-      let reply = data.choices[0].message.content.trim();
-
-      // Détecter les actions portail
-      if(reply.includes('ACTION:OUVRIR_PORTAIL')){
-        reply = reply.replace('ACTION:OUVRIR_PORTAIL','').trim();
-        setTimeout(()=>{ if(!gateOpen){ gateOpen=true; gateTargetAngle=1; updatePadlock(); gardenerGateAction=true; gardenerState='walking'; } }, 800);
-      }
-      if(reply.includes('ACTION:FERMER_PORTAIL')){
-        reply = reply.replace('ACTION:FERMER_PORTAIL','').trim();
-        setTimeout(()=>{ if(gateOpen){ gateOpen=false; gateTargetAngle=0; updatePadlock(); gardenerCloseAction=true; gardenerState='walking'; } }, 800);
-      }
-
-      addMessage(reply, 'npc');
-      conversationHistory.push({role:'assistant', content: reply});
-      saveMemory(conversationHistory);
-
-      // Màj note mémoire
-      document.getElementById('chatMemoryNote').textContent =
-        `💾 Mémoire activée · ${conversationHistory.length/2|0} échanges mémorisés`;
-    } else {
-      addMessage("(Je n'ai pas bien entendu… Répétez ?)", 'npc');
-    }
-  } catch(err) {
-    hideTyping();
-    addMessage("(Connexion impossible… Vérifiez votre clé API Groq)", 'npc');
+  // Exécuter l'action si présente
+  if(node.action === 'OUVRIR_PORTAIL'){
+    setTimeout(()=>{
+      if(!gateOpen){ gateOpen=true; gateTargetAngle=1; updatePadlock();
+        gardenerGateAction=true; gardenerState='walking'; }
+    }, 600);
+  }
+  if(node.action === 'FERMER_PORTAIL'){
+    setTimeout(()=>{
+      if(gateOpen){ gateOpen=false; gateTargetAngle=0; updatePadlock();
+        gardenerCloseAction=true; gardenerState='walking'; }
+    }, 600);
   }
 
-  btn.disabled = false;
-  setTimeout(()=>{ document.getElementById('chatInput').focus(); }, 50);
+  const opts = document.getElementById('dialogOptions');
+  opts.innerHTML = '';
+  node.options.forEach(opt => {
+    const btn = document.createElement('button');
+    btn.className = 'dopt';
+    btn.textContent = opt.label;
+    btn.onclick = () => {
+      if(opt.suite === null){ closeChat(); }
+      else { currentNode = opt.suite; renderDialogNode(opt.suite); }
+    };
+    opts.appendChild(btn);
+  });
 }
-
-// Touche Entrée pour envoyer
-document.getElementById('chatInput').addEventListener('keydown', e=>{
-  if(e.key === 'Enter') sendMessage();
-  e.stopPropagation();
-});
 
 // Touche E pour ouvrir/fermer
 document.addEventListener('keydown', e=>{
@@ -4028,7 +3992,7 @@ function loop(ts){
     const gx=gardener.position.x-camera.position.x, gz=gardener.position.z-camera.position.z;
     const gdist=Math.sqrt(gx*gx+gz*gz);
     nearGardener = gdist < 4.5;
-    talkBubble.style.display = (nearGardener && !inDialogue) ? 'block' : 'none';
+    approachBubble.style.display = (nearGardener && !inDialogue) ? 'block' : 'none';
     // Le jardinier se tourne vers le joueur quand on est tout proche (et pas en activité)
     if(gdist < 3.0 && (gardenerState==='idle'||gardenerState==='raking'||gardenerState==='watering')){
       gardener.rotation.y = Math.atan2(camera.position.x-gardener.position.x, camera.position.z-gardener.position.z);
@@ -4061,6 +4025,7 @@ function loop(ts){
   drawMinimap();
 
 drawClock();
+  tickAutoSpeech(dt);
   renderer.render(scene,camera);
   drawJoy('jL',jLx,jLy);
   drawJoy('jR',jRx,jRy);
