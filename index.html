@@ -2440,7 +2440,8 @@ DOORS.forEach(door=>{
     // Clone de la géométrie légèrement agrandi
     const glowMesh = lf.pivot.children[0].clone();
     glowMesh.material = mGlow;
-    glowMesh.scale.set(1.05,1.02,2.5);
+    glowMesh.scale.set(1.06, 1.03, 1.0);
+    glowMesh.position.x += 0.0;
     glowMesh.visible = false;
     lf.pivot.add(glowMesh);
     lf.glowMesh = glowMesh;
@@ -3697,6 +3698,8 @@ function resolveCollisions(px, pz){
     for(const b of doorColliders){
       if(isOpen(b.doorId)) continue;
       if(onUpper && b.z1 >= -27.3 && b.z2 <= -26.7) continue;
+      // Au 1er étage, les portes endLeft/endRight (RDC) ne bloquent pas
+      if(onUpper && (b.doorId === 'endLeft' || b.doorId === 'endRight')) continue;
       if(collidesBox(px,pz,b)) [px,pz] = pushOutBox(px,pz,b);
     }
     // Jardinier dynamique
