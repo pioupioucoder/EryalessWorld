@@ -1771,15 +1771,13 @@ const sdBack = makeBackDoor();
   //     Coordonnées référence : X:25.40 Y:6.21 Z:17.00
   // ═══════════════════════════════════════════════════
   // ── Renfoncement devant portes de classe (Z=15.8 → 18.5, X=±24 à ±27) ──
-  // Mur de fermeture avant (Z=18.5), largeur 3, côté droit et gauche
+  // Mur de fermeture du couloir (Z=18.5), pleine largeur — ferme le côté cour
   box(3, cH, D, mS,  25.5, yOff + cH/2, 18.5);
   box(3, cH, D, mS, -25.5, yOff + cH/2, 18.5);
   // Mur latéral intérieur X=±24 : segment Z=15.8 → 18.5 (complète le mur latéral)
   box(D, cH, 18.5 - 15.8, mS,  24, yOff + cH/2, (15.8 + 18.5) / 2);
   box(D, cH, 18.5 - 15.8, mS, -24, yOff + cH/2, (15.8 + 18.5) / 2);
-  // Mur latéral extérieur X=±27 : de Z=-27 à Z=18.5 (ferme l'extérieur du renfoncement)
-  box(D, cH, 18.5 - 15.8, mS,  27, yOff + cH/2, (15.8 + 18.5) / 2);
-  box(D, cH, 18.5 - 15.8, mS, -27, yOff + cH/2, (15.8 + 18.5) / 2);
+  // Mur X=±27 : supprimé — c'est lui qui bloquait devant la porte de classe
 
   // ═══════════════════════════════════════════════════
   // 5) BOUCHER le vide au-dessus des portes latérales RDC (X=±24, Z=-10)
@@ -3804,7 +3802,7 @@ function loop(ts){
   camera.lookAt(camera.position.clone().add(dir));
 
   // ─── PORTES : proximité + animation ──────────────────────────
-  const camPos2D = new THREE.Vector3(camera.position.x, 1.7, camera.position.z);
+  const camPos2D = new THREE.Vector3(camera.position.x, camera.position.y, camera.position.z);
   // Détermine si le joueur est au 1er étage (y > 4.5) ou au rez-de-chaussée
   const playerOnUpper = camera.position.y > 4.5;
   let nearDoor = null;
