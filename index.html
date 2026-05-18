@@ -18,7 +18,13 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; }
 #jL, #jR { cursor:pointer; touch-action:none; border-radius:8px; background:#111; }
 
 /* ── PANNEAUX FLOTTANTS ── */
-#coordPanel {
+#outsideIndicator {
+  position:fixed; top:50px; left:50%; transform:translateX(-50%);
+  z-index:100; background:rgba(0,80,0,0.75); border:1px solid #4a8a20;
+  border-radius:20px; padding:5px 16px; font-size:12px;
+  letter-spacing:1px; color:#a0f060; font-family:'Courier New',monospace;
+  backdrop-filter:blur(4px); display:none; pointer-events:none;
+}
   position:fixed; top:10px; left:10px; z-index:100;
   background:rgba(15,12,8,0.88); border:1px solid #4a3a20;
   border-radius:8px; padding:8px 12px; font-family:'Courier New',monospace;
@@ -84,6 +90,9 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; }
 <body>
 <canvas id="gc"></canvas>
 
+<!-- Indicateur monde extérieur -->
+<div id="outsideIndicator">🌿 Monde extérieur — Utilisez Vol pour explorer librement</div>
+
 <!-- Barre de boutons paramètres -->
 <div id="paramBar">
   <button class="pBtn" id="btnCoords" onclick="toggleCoords()"><span class="icon">📍</span>Coordonnées</button>
@@ -127,9 +136,9 @@ renderer.setClearColor(0x5a9fd4);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x8ab0cc, 0.004);
+scene.fog = new THREE.FogExp2(0x8ab0cc, 0.0018);
 
-const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 1200);
+const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 4000);
 camera.position.set(0, 1.7, 16);
 
 function resize(){
@@ -264,68 +273,375 @@ function box(w,h,d,mat,x,y,z,ry=0,cast=true){
 // ─── SOL ─────────────────────────────────────────────────────
 add(new THREE.PlaneGeometry(60,60),mPave,0,0,0,-Math.PI/2,0,0,false);
 
-// ─── TERRE ÉLOIGNÉE À L'HORIZON ─────────────────────────────────────
-// Grande plaine herbeuse lointaine
+// ─── MONDE EXTÉRIEUR INFINI ─────────────────────────────────────
+// Sol de base énorme (couvre tout l'espace visible)
 {
-  const distGround = new THREE.Mesh(
-    new THREE.PlaneGeometry(1800, 1800),
-    new THREE.MeshLambertMaterial({color:0x5a8c35})
-  );
-  distGround.rotation.x = -Math.PI/2;
-  distGround.position.set(0, -0.5, -600);
-  distGround.receiveShadow = false;
-  scene.add(distGround);
+  const baseMat = new THREE.MeshLambertMaterial({color:0x5a8c35});
+  const baseGround = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000), baseMat);
+  baseGround.rotation.x = -Math.PI/2;
+  baseGround.position.set(0, -0.05, -500);
+  scene.add(baseGround);
+}
 
-  // Masse de terre principale : une longue colline basse à l'horizon
-  const landMat = new THREE.MeshLambertMaterial({color:0x4a7a28});
-  const landMat2 = new THREE.MeshLambertMaterial({color:0x3a6a20});
-  const landMat3 = new THREE.MeshLambertMaterial({color:0x6a9a40});
+// ─── SYSTÈME DE CHUNKS INFINIS ─────────────────────────────────
+// Chunks de 60×60 unités, générés autour du joueur
+const CHUNK_SIZE = 60;
+const CHUNK_RADIUS = 5; // 5 chunks dans chaque direction = monde de ~600u visible
+const activeChunks = new Map(); // "cx,cz" → group
 
-  // Colline centrale large et basse
-  const hill1 = new THREE.Mesh(new THREE.SphereGeometry(80, 20, 10, 0, Math.PI*2, 0, Math.PI/2), landMat);
-  hill1.position.set(0, -2, -320);
-  hill1.scale.set(3.5, 0.18, 1.0);
-  scene.add(hill1);
+// Matériaux extérieurs
+const mOutGrass  = new THREE.MeshLambertMaterial({color:0x4a8a28});
+const mSakuraTrunk = new THREE.MeshLambertMaterial({color:0x6a4030});
+const mSakuraBlossom = new THREE.MeshLambertMaterial({color:0xffb0c8, transparent:true, opacity:0.9});
+const mSakuraBlossom2 = new THREE.MeshLambertMaterial({color:0xff90b0, transparent:true, opacity:0.85});
+const mExtTree   = new THREE.MeshLambertMaterial({color:0x2a6020});
+const mExtTrunk  = new THREE.MeshLambertMaterial({color:0x5a3820});
+const mRoad      = new THREE.MeshLambertMaterial({color:0x555060});
+const mRoadLine  = new THREE.MeshLambertMaterial({color:0xf0e880});
+const mBush2     = new THREE.MeshLambertMaterial({color:0x2e5510});
 
-  // Colline gauche
-  const hill2 = new THREE.Mesh(new THREE.SphereGeometry(60, 16, 8, 0, Math.PI*2, 0, Math.PI/2), landMat2);
-  hill2.position.set(-180, -2, -280);
-  hill2.scale.set(2.8, 0.22, 1.0);
-  scene.add(hill2);
+// Déterministe pseudo-aléatoire par position
+function seededRand(x, z, salt=0){
+  const n = Math.sin(x*127.1 + z*311.7 + salt*91.3) * 43758.5453;
+  return n - Math.floor(n);
+}
 
-  // Colline droite
-  const hill3 = new THREE.Mesh(new THREE.SphereGeometry(70, 16, 8, 0, Math.PI*2, 0, Math.PI/2), landMat3);
-  hill3.position.set(200, -2, -300);
-  hill3.scale.set(2.4, 0.20, 1.0);
-  scene.add(hill3);
-
-  // Petite colline lointaine (encore plus loin)
-  const hill4 = new THREE.Mesh(new THREE.SphereGeometry(90, 16, 8, 0, Math.PI*2, 0, Math.PI/2), new THREE.MeshLambertMaterial({color:0x3a6030}));
-  hill4.position.set(-80, -1, -480);
-  hill4.scale.set(4.0, 0.12, 1.2);
-  scene.add(hill4);
-
-  const hill5 = new THREE.Mesh(new THREE.SphereGeometry(70, 16, 8, 0, Math.PI*2, 0, Math.PI/2), new THREE.MeshLambertMaterial({color:0x507040}));
-  hill5.position.set(160, -1, -450);
-  hill5.scale.set(3.2, 0.15, 1.0);
-  scene.add(hill5);
-
-  // Quelques arbres lointains (simples cônes)
-  const mDistTree = new THREE.MeshLambertMaterial({color:0x1e4010});
-  const mDistTrunk = new THREE.MeshLambertMaterial({color:0x3a2010});
-  const treePositions = [
-    [-60, -290], [40,-310], [-140,-270], [120,-295],
-    [-30,-340], [80,-330], [-200,-260], [250,-280],
-    [10,-360], [-100,-350], [180,-345], [-250,-330],
+// Génère un sakura
+function makeSakura(group, lx, lz, h=6) {
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.22, h, 7), mSakuraTrunk);
+  trunk.position.set(lx, h/2, lz); trunk.castShadow=true; group.add(trunk);
+  // Boules de fleurs roses
+  const blobs = [
+    [0,0,3.2,2.2,3.2],[1.8,0.3,2.4,1.8,2.4],[-1.8,0.2,2.4,1.6,2.4],
+    [0.8,-0.3,2.0,1.4,2.0],[-0.9,-0.2,1.8,1.3,1.8],[0,0.7,2.0,1.4,2.0]
   ];
-  treePositions.forEach(([tx, tz]) => {
-    const h = 6 + Math.random()*8;
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.5,h*0.4,6), mDistTrunk);
-    trunk.position.set(tx, h*0.2-1, tz);
-    scene.add(trunk);
-    const foliage = new THREE.Mesh(new THREE.ConeGeometry(2.5+Math.random()*1.5, h, 7), mDistTree);
-    foliage.position.set(tx, h*0.6, tz);
-    scene.add(foliage);
+  blobs.forEach(([ox,oz,rx,ry,rz])=>{
+    const m = Math.random()<0.5 ? mSakuraBlossom : mSakuraBlossom2;
+    const blob = new THREE.Mesh(new THREE.SphereGeometry(1, 7, 5), m);
+    blob.scale.set(rx,ry*0.7,rz);
+    blob.position.set(lx+ox, h+ry*0.25, lz+oz);
+    blob.castShadow=true; group.add(blob);
+  });
+  // Pétales tombants (quelques disques)
+  for(let p=0;p<4;p++){
+    const angle = seededRand(lx+p, lz, 99)*Math.PI*2;
+    const dist  = 0.5+seededRand(lx, lz+p, 88)*2.5;
+    const petal = new THREE.Mesh(new THREE.CircleGeometry(0.12,4), mSakuraBlossom);
+    petal.rotation.x = -Math.PI/2 + (Math.random()-0.5)*0.8;
+    petal.position.set(lx+Math.cos(angle)*dist, 0.05, lz+Math.sin(angle)*dist);
+    group.add(petal);
+  }
+}
+
+// Génère un arbre normal
+function makeExtTree(group, lx, lz, h=7, color=0x2a6020) {
+  const m = new THREE.MeshLambertMaterial({color});
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.2, h*0.5, 6), mExtTrunk);
+  trunk.position.set(lx, h*0.25, lz); trunk.castShadow=true; group.add(trunk);
+  const crown = new THREE.Mesh(new THREE.SphereGeometry(1,7,5), m);
+  crown.scale.set(h*0.45, h*0.32, h*0.45);
+  crown.position.set(lx, h*0.65, lz); crown.castShadow=true; group.add(crown);
+}
+
+// Génère un oiseau simple (deux triangles = V)
+function makeBird(group, bx, by, bz, scale=0.5) {
+  const bMat = new THREE.MeshLambertMaterial({color:0x222222, side:THREE.DoubleSide});
+  [-1,1].forEach(side=>{
+    const geo = new THREE.BufferGeometry();
+    const verts = new Float32Array([
+      0, 0, 0,
+      side*scale*1.4, scale*0.4, 0,
+      side*scale*0.6, 0, 0
+    ]);
+    geo.setAttribute('position', new THREE.BufferAttribute(verts,3));
+    const m = new THREE.Mesh(geo, bMat);
+    m.position.set(bx, by, bz);
+    group.add(m);
+  });
+}
+
+// Génère un lapin simple
+function makeRabbit(group, rx, rz) {
+  const mFur = new THREE.MeshLambertMaterial({color:0xe8e0d0});
+  const mEye = new THREE.MeshLambertMaterial({color:0xff4060});
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.18,7,5), mFur);
+  body.scale.set(1, 0.9, 1.2); body.position.set(rx, 0.18, rz); body.castShadow=true; group.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.11,7,5), mFur);
+  head.position.set(rx, 0.36, rz-0.12); group.add(head);
+  // Oreilles
+  [-0.04, 0.04].forEach(ex=>{
+    const ear = new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.025,0.18,5), mFur);
+    ear.position.set(rx+ex, 0.53, rz-0.12); group.add(ear);
+  });
+  // Yeux
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.02,4,4), mEye);
+  eye.position.set(rx+0.05, 0.39, rz-0.22); group.add(eye);
+}
+
+// Génère un chat errant
+function makeCat(group, cx, cz) {
+  const mCatFur = new THREE.MeshLambertMaterial({color:0xd09050});
+  const mCatEye = new THREE.MeshLambertMaterial({color:0x50c050});
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.18, 0.45), mCatFur);
+  body.position.set(cx, 0.22, cz); body.castShadow=true; group.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.10,7,5), mCatFur);
+  head.position.set(cx, 0.36, cz-0.22); group.add(head);
+  // Oreilles triangulaires
+  [-0.05, 0.05].forEach(ex=>{
+    const earGeo = new THREE.ConeGeometry(0.035,0.06,3);
+    const ear = new THREE.Mesh(earGeo, mCatFur);
+    ear.position.set(cx+ex, 0.46, cz-0.22); group.add(ear);
+  });
+  // Yeux
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.02,4,4), mCatEye);
+  eye.position.set(cx+0.04, 0.38, cz-0.32); group.add(eye);
+  // Queue courbée
+  const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.025,0.28,5), mCatFur);
+  tail.rotation.x = -0.8; tail.position.set(cx, 0.30, cz+0.25); group.add(tail);
+}
+
+// Route principale (s'étend de -Z à +Z, traverse le monde)
+// Créée une fois, ne fait pas partie des chunks
+{
+  // Route vers le sud (Z négatif, depuis le portail à Z=-147.5)
+  const roadMat = new THREE.MeshLambertMaterial({color:0x505058});
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(8, 2000), roadMat);
+  road.rotation.x = -Math.PI/2; road.position.set(0, 0.01, -1150);
+  scene.add(road);
+  // Lignes de route (tirets jaunes)
+  for(let z=-200; z>=-2000; z-=20){
+    const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 8), mRoadLine);
+    dash.rotation.x = -Math.PI/2; dash.position.set(0, 0.02, z);
+    scene.add(dash);
+  }
+  // Bordures route
+  [-4.2, 4.2].forEach(rx=>{
+    const edge = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 2000), new THREE.MeshLambertMaterial({color:0xc0b090}));
+    edge.rotation.x = -Math.PI/2; edge.position.set(rx, 0.015, -1150);
+    scene.add(edge);
+  });
+
+  // Route vers l'est (X positif)
+  const roadE = new THREE.Mesh(new THREE.PlaneGeometry(2000, 8), roadMat);
+  roadE.rotation.x = -Math.PI/2; roadE.position.set(1000-100, 0.01, -400);
+  scene.add(roadE);
+  for(let x=100; x<=2000; x+=20){
+    const dash = new THREE.Mesh(new THREE.PlaneGeometry(8, 0.2), mRoadLine);
+    dash.rotation.x = -Math.PI/2; dash.position.set(x-100, 0.02, -400);
+    scene.add(dash);
+  }
+
+  // Route vers l'ouest (X négatif)
+  const roadW = new THREE.Mesh(new THREE.PlaneGeometry(2000, 8), roadMat);
+  roadW.rotation.x = -Math.PI/2; roadW.position.set(-900, 0.01, -400);
+  scene.add(roadW);
+}
+
+// ─── Vol d'oiseaux animés ─────────────────────────────────────
+const birdFlock = [];
+const birdGroup = new THREE.Group();
+scene.add(birdGroup);
+for(let i=0; i<12; i++){
+  const b = {
+    x: (Math.random()-0.5)*200,
+    y: 15 + Math.random()*30,
+    z: -100 - Math.random()*200,
+    speed: 3+Math.random()*3,
+    phase: Math.random()*Math.PI*2,
+    radius: 60+Math.random()*100,
+    angle: Math.random()*Math.PI*2,
+    wingPhase: Math.random()*Math.PI*2
+  };
+  // Ailes (V animé)
+  const bMat = new THREE.MeshLambertMaterial({color:0x1a1a22, side:THREE.DoubleSide});
+  const leftWing  = new THREE.Mesh(new THREE.PlaneGeometry(0.8,0.3), bMat);
+  const rightWing = new THREE.Mesh(new THREE.PlaneGeometry(0.8,0.3), bMat);
+  leftWing.position.set(-0.5, 0, 0);
+  rightWing.position.set(0.5, 0, 0);
+  const birdObj = new THREE.Group();
+  birdObj.add(leftWing); birdObj.add(rightWing);
+  birdObj.position.set(b.x, b.y, b.z);
+  birdGroup.add(birdObj);
+  b.mesh = birdObj; b.lw = leftWing; b.rw = rightWing;
+  birdFlock.push(b);
+}
+
+// ─── Génération des chunks ──────────────────────────────────────
+function generateChunk(cx, cz) {
+  const key = `${cx},${cz}`;
+  if(activeChunks.has(key)) return;
+
+  const group = new THREE.Group();
+  const worldX = cx * CHUNK_SIZE;
+  const worldZ = cz * CHUNK_SIZE;
+
+  // Exclure la zone du lycée (X: -40..40, Z: -160..25)
+  const inSchool = worldX > -80 && worldX < 80 && worldZ > -200 && worldZ < 50;
+  if(inSchool && cx >= -1 && cx <= 1 && cz >= -3 && cz <= 1) {
+    activeChunks.set(key, group); // chunk vide pour la zone lycée
+    scene.add(group);
+    return;
+  }
+
+  // Sol herbe
+  const grassMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE),
+    mOutGrass
+  );
+  grassMesh.rotation.x = -Math.PI/2;
+  grassMesh.position.set(worldX, -0.02, worldZ);
+  group.add(grassMesh);
+
+  // Contenu procédural basé sur la position du chunk
+  const rng = (s) => seededRand(cx, cz, s);
+
+  // Arbres et sakuras (4-12 par chunk selon la zone)
+  const numTrees = Math.floor(rng(1)*10) + 3;
+  for(let t=0; t<numTrees; t++){
+    const lx = worldX + (seededRand(cx*17+t, cz, 2)-0.5)*CHUNK_SIZE*0.9;
+    const lz = worldZ + (seededRand(cx, cz*13+t, 3)-0.5)*CHUNK_SIZE*0.9;
+    // Éviter la route
+    const onRoadNS = Math.abs(lx) < 6 && lz < -147;
+    const onRoadEW = Math.abs(lz+400) < 6 && lx > 30;
+    if(onRoadNS || onRoadEW) continue;
+
+    const isSakura = seededRand(cx+t*7, cz+t*3, 5) < 0.3;
+    const h = 5 + seededRand(cx*t, cz, 6)*6;
+    if(isSakura) {
+      makeSakura(group, lx, lz, h);
+    } else {
+      const treeColor = seededRand(cx, cz+t, 7) < 0.5 ? 0x2a7020 : 0x1e5518;
+      makeExtTree(group, lx, lz, h, treeColor);
+    }
+  }
+
+  // Buissons (0-5)
+  const numBush = Math.floor(rng(10)*5);
+  for(let b=0; b<numBush; b++){
+    const lx = worldX + (seededRand(cx+b*11, cz, 11)-0.5)*CHUNK_SIZE*0.85;
+    const lz = worldZ + (seededRand(cx, cz+b*7, 12)-0.5)*CHUNK_SIZE*0.85;
+    const sz = 0.8+rng(b+15)*1.2;
+    const bush2 = new THREE.Mesh(new THREE.SphereGeometry(1,6,4), mBush2);
+    bush2.scale.set(sz, sz*0.6, sz); bush2.position.set(lx, sz*0.3, lz); group.add(bush2);
+  }
+
+  // Animaux (lapins, chats — aléatoirement, rarement)
+  if(rng(20) < 0.25) {
+    const lx = worldX + (rng(21)-0.5)*CHUNK_SIZE*0.7;
+    const lz = worldZ + (rng(22)-0.5)*CHUNK_SIZE*0.7;
+    if(rng(23) < 0.5) makeRabbit(group, lx, lz);
+    else makeCat(group, lx, lz);
+  }
+
+  // Collines douces (quelques chunks éloignés)
+  if(Math.abs(cx) > 2 || Math.abs(cz) < -3){
+    const hillH = rng(30)*4;
+    if(hillH > 1.5){
+      const hillMat = new THREE.MeshLambertMaterial({color:0x4a7a28});
+      const hill = new THREE.Mesh(new THREE.SphereGeometry(CHUNK_SIZE*0.35,10,7,0,Math.PI*2,0,Math.PI/2), hillMat);
+      hill.scale.set(1.8, hillH/(CHUNK_SIZE*0.35), 1.4);
+      hill.position.set(worldX, -1, worldZ);
+      group.add(hill);
+    }
+  }
+
+  scene.add(group);
+  activeChunks.set(key, group);
+}
+
+function disposeChunk(key) {
+  const group = activeChunks.get(key);
+  if(!group) return;
+  group.traverse(obj=>{
+    if(obj.geometry) obj.geometry.dispose();
+  });
+  scene.remove(group);
+  activeChunks.delete(key);
+}
+
+function updateChunks(playerX, playerZ) {
+  // Toujours générer les chunks visibles
+  const pcx = Math.round(playerX / CHUNK_SIZE);
+  const pcz = Math.round(playerZ / CHUNK_SIZE);
+  const needed = new Set();
+  for(let dx=-CHUNK_RADIUS; dx<=CHUNK_RADIUS; dx++){
+    for(let dz=-CHUNK_RADIUS; dz<=CHUNK_RADIUS; dz++){
+      const key = `${pcx+dx},${pcz+dz}`;
+      needed.add(key);
+      generateChunk(pcx+dx, pcz+dz);
+    }
+  }
+  // Supprimer les chunks trop lointains
+  for(const [key] of activeChunks){
+    if(!needed.has(key)) disposeChunk(key);
+  }
+}
+
+// Génération initiale autour du lycée
+updateChunks(0, 0);
+
+// ─── EASTER EGG CACHÉ : Cabane mystérieuse loin au sud ──────────
+// À environ X=120, Z=-380 (loin dans le monde, pas facile à trouver)
+{
+  const ex = 120, ez = -380;
+  const mCabane = new THREE.MeshLambertMaterial({color:0x6a4028});
+  const mCabaneRoof = new THREE.MeshLambertMaterial({color:0x8a2810});
+  const mSecret = new THREE.MeshLambertMaterial({color:0x201010});
+
+  // Corps de la cabane
+  box(5, 3.5, 4, mCabane, ex, 1.75, ez);
+  // Toit (triangle)
+  const roofVerts = new Float32Array([
+    -2.8, 0, -2.2,  2.8, 0, -2.2,  0, 2, -2.2,
+    -2.8, 0,  2.2,  2.8, 0,  2.2,  0, 2,  2.2,
+    -2.8, 0, -2.2, -2.8, 0,  2.2,  0, 2,  2.2,  0, 2, -2.2,
+     2.8, 0,  2.2,  2.8, 0, -2.2,  0, 2, -2.2,  0, 2,  2.2,
+  ]);
+  const roofIdx = [0,1,2, 3,5,4, 6,7,8,6,8,9, 10,11,12,10,12,13];
+  const roofGeo = new THREE.BufferGeometry();
+  roofGeo.setAttribute('position', new THREE.BufferAttribute(roofVerts, 3));
+  roofGeo.setIndex(roofIdx);
+  roofGeo.computeVertexNormals();
+  const roofMesh = new THREE.Mesh(roofGeo, mCabaneRoof);
+  roofMesh.position.set(ex, 3.5, ez);
+  scene.add(roofMesh);
+
+  // Porte
+  box(1.2, 2.2, 0.1, new THREE.MeshLambertMaterial({color:0x3a2010}), ex, 1.1, ez-2.05);
+
+  // Panneau mystérieux sur le mur
+  const panCanvas = document.createElement('canvas');
+  panCanvas.width=256; panCanvas.height=256;
+  const panCtx = panCanvas.getContext('2d');
+  panCtx.fillStyle='#080808'; panCtx.fillRect(0,0,256,256);
+  panCtx.strokeStyle='#ff2020'; panCtx.lineWidth=3; panCtx.strokeRect(8,8,240,240);
+  panCtx.fillStyle='#ff3030'; panCtx.font='bold 22px monospace'; panCtx.textAlign='center';
+  panCtx.fillText('⚠ ZONE INTERDITE ⚠', 128, 50);
+  panCtx.fillStyle='#cc2020'; panCtx.font='14px monospace';
+  panCtx.fillText('Accès réservé au', 128, 90);
+  panCtx.fillText('personnel autorisé', 128, 110);
+  panCtx.fillStyle='#ff8080'; panCtx.font='bold 48px serif';
+  panCtx.fillText('☢', 128, 175);
+  panCtx.fillStyle='#880000'; panCtx.font='12px monospace';
+  panCtx.fillText('DOSSIER: JD-1979-B', 128, 220);
+  const panTex = new THREE.CanvasTexture(panCanvas);
+  const panMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.8, 1.8),
+    new THREE.MeshBasicMaterial({map:panTex})
+  );
+  panMesh.position.set(ex-2.55, 2.2, ez); panMesh.rotation.y = Math.PI/2;
+  scene.add(panMesh);
+
+  // Lumière rouge subtile à l'intérieur
+  const secretLight = new THREE.PointLight(0xff2020, 0.8, 8);
+  secretLight.position.set(ex, 2.5, ez);
+  scene.add(secretLight);
+
+  // Quelques sakuras autour de la cabane
+  const eGroup = new THREE.Group();
+  scene.add(eGroup);
+  [[ex+6, ez-3],[ex-6, ez+2],[ex+3, ez+5]].forEach(([sx,sz])=>{
+    makeSakura(eGroup, sx, sz, 6+Math.random()*3);
   });
 }
 
@@ -1397,7 +1713,7 @@ skyCtx.fillStyle=skyGrad;
 skyCtx.fillRect(0,0,1,256);
 const skyTex=new THREE.CanvasTexture(skyCanvas);
 const skyMat=new THREE.MeshBasicMaterial({map:skyTex,side:THREE.BackSide});
-const skySphere=new THREE.Mesh(new THREE.SphereGeometry(150,16,12),skyMat);
+const skySphere=new THREE.Mesh(new THREE.SphereGeometry(2000,16,12),skyMat);
 scene.add(skySphere);
 
 // Nuages blancs bien définis, bouffants
@@ -2423,6 +2739,15 @@ const DOORS = [
     pos: sdToilette.pos, leaves: sdToilette.leaves, outDir: 0,
     animAngle: 0, targetAngle: 0, open: false,
     floor: 0,
+  },
+  // Porte cadenas cour arrière (pas de vantail 3D — juste le collider)
+  {
+    id:'fenceGate',
+    pos: new THREE.Vector3(17.46, 1.7, -147.5),
+    leaves: [], // pas de vantail animé (la porte cadenas existe déjà)
+    animAngle: 0, targetAngle: 0, open: false,
+    floor: 0,
+    isFenceGate: true,
   },
 ];
 
@@ -3867,6 +4192,192 @@ function updateInteractHint(){
   intSign.position.set(tRoomXmin+0.08, tRoomH-0.6, tRoomCZ); intSign.rotation.y=Math.PI/2; scene.add(intSign);
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// ─── COUR ARRIÈRE CLÔTURÉE ───────────────────────────────────────────
+// Enceinte rectangulaire fermée sur le bâtiment principal (côté Z=-27.5)
+// ~8× la surface du bâtiment (54×60 = 3240 u²), seule sortie = porte cadenas
+// Mur gauche X=-27, Mur droit X=+27, Mur arrière Z=-87.5
+// ═══════════════════════════════════════════════════════════════════════
+{
+  const CY_X1 = -27.0;   // bord gauche (aligné mur arrière bâtiment)
+  const CY_X2 =  27.0;   // bord droit
+  const CY_Z1 = -27.5;   // bord nord = mur arrière du bâtiment principal
+  const CY_Z2 = -147.5;  // bord sud (120 unités de profondeur)
+  const FENCE_H  = 3.2;
+  const POST_GAP = 4.0;
+
+  // Porte cadenas sur le mur arrière
+  const GATE_X = 17.46;
+  const GATE_W = 1.6;
+  const gateX1 = GATE_X - GATE_W/2;
+  const gateX2 = GATE_X + GATE_W/2;
+
+  // Matériaux
+  const mFencePost   = new THREE.MeshLambertMaterial({color:0x1a5010});
+  const mFenceWire   = new THREE.MeshLambertMaterial({color:0x267018});
+  const mGateMetal   = new THREE.MeshLambertMaterial({color:0x1a5010});
+  const mFenceGold   = new THREE.MeshLambertMaterial({color:0xd4a010});
+  const mFenceGoldDk = new THREE.MeshLambertMaterial({color:0xa07808});
+
+  // Texture grillage carré — cellule de 32px = ~0.5u monde
+  function makeGrillageTex(cellPx) {
+    const s = 256;
+    const gc = document.createElement('canvas'); gc.width=s; gc.height=s;
+    const gx = gc.getContext('2d');
+    gx.clearRect(0,0,s,s);
+    gx.strokeStyle = '#267828'; gx.lineWidth = 3;
+    for(let y=0; y<=s; y+=cellPx){ gx.beginPath(); gx.moveTo(0,y); gx.lineTo(s,y); gx.stroke(); }
+    for(let x=0; x<=s; x+=cellPx){ gx.beginPath(); gx.moveTo(x,0); gx.lineTo(x,s); gx.stroke(); }
+    const t = new THREE.CanvasTexture(gc);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    return t;
+  }
+  const grillTex = makeGrillageTex(32);
+
+  // ── Section grillage mur arrière (face Z, plan XY) ──────────────────
+  function makeFenceSectionZ(xStart, xEnd, z, h) {
+    const w = xEnd - xStart; if(w < 0.05) return;
+    // Utilise repeat.set pour que le grillage soit continu (pas de déformation)
+    const m2 = new THREE.MeshLambertMaterial({
+      map: (()=>{
+        const t = grillTex.clone();
+        t.repeat.set(w * 0.5, h * 0.5);
+        t.needsUpdate = true;
+        return t;
+      })(),
+      transparent:true, opacity:0.88, side:THREE.DoubleSide, color:0x1a7010
+    });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), m2);
+    mesh.position.set(xStart+w/2, h/2, z);
+    scene.add(mesh);
+  }
+
+  // ── Section grillage mur latéral (face X, plan ZY, rotation Y=90°) ──
+  function makeFenceSectionX(x, zStart, zEnd, h) {
+    const d = Math.abs(zEnd-zStart); if(d < 0.05) return;
+    const zMid = (zStart+zEnd)/2;
+    const m2 = new THREE.MeshLambertMaterial({
+      map: (()=>{
+        const t = grillTex.clone();
+        t.repeat.set(d * 0.5, h * 0.5);
+        t.needsUpdate = true;
+        return t;
+      })(),
+      transparent:true, opacity:0.88, side:THREE.DoubleSide, color:0x1a7010
+    });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(d, h), m2);
+    mesh.rotation.y = Math.PI/2;
+    mesh.position.set(x, h/2, zMid);
+    scene.add(mesh);
+  }
+
+  // ── Poteau universel ─────────────────────────────────────────────────
+  function addPost(x, z) {
+    const p = new THREE.Mesh(new THREE.BoxGeometry(0.10, FENCE_H+0.30, 0.10), mFencePost);
+    p.position.set(x, (FENCE_H+0.30)/2, z); p.castShadow=true; scene.add(p);
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.08, 0.15), mFencePost);
+    cap.position.set(x, FENCE_H+0.34, z); scene.add(cap);
+  }
+
+  // ── Rails mur Z (courant en X) ───────────────────────────────────────
+  function addRailsZ(xStart, xEnd, z) {
+    const w = xEnd-xStart; if(w<0.05) return;
+    [FENCE_H+0.02, FENCE_H*0.50, 0.08].forEach(ry=>{
+      const r = new THREE.Mesh(new THREE.BoxGeometry(w,0.07,0.07), mFenceWire);
+      r.position.set(xStart+w/2, ry, z); scene.add(r);
+    });
+  }
+
+  // ── Rails mur X (courant en Z) ───────────────────────────────────────
+  function addRailsX(x, zStart, zEnd) {
+    const d = Math.abs(zEnd-zStart); if(d<0.05) return;
+    const zMid = (zStart+zEnd)/2;
+    [FENCE_H+0.02, FENCE_H*0.50, 0.08].forEach(ry=>{
+      const r = new THREE.Mesh(new THREE.BoxGeometry(0.07,0.07,d), mFenceWire);
+      r.position.set(x, ry, zMid); scene.add(r);
+    });
+  }
+
+  // ════ MUR GAUCHE ════════════════════════════════════════════════════
+  makeFenceSectionX(CY_X1, CY_Z1, CY_Z2, FENCE_H);
+  addRailsX(CY_X1, CY_Z1, CY_Z2);
+  for(let z=CY_Z1; z>=CY_Z2-0.1; z-=POST_GAP) addPost(CY_X1, Math.round(z*10)/10);
+
+  // ════ MUR DROIT ══════════════════════════════════════════════════════
+  makeFenceSectionX(CY_X2, CY_Z1, CY_Z2, FENCE_H);
+  addRailsX(CY_X2, CY_Z1, CY_Z2);
+  for(let z=CY_Z1; z>=CY_Z2-0.1; z-=POST_GAP) addPost(CY_X2, Math.round(z*10)/10);
+
+  // ════ MUR ARRIÈRE (avec porte cadenas) ════════════════════════════════
+  makeFenceSectionZ(CY_X1, gateX1, CY_Z2, FENCE_H);
+  makeFenceSectionZ(gateX2, CY_X2, CY_Z2, FENCE_H);
+  addRailsZ(CY_X1, gateX1, CY_Z2);
+  addRailsZ(gateX2, CY_X2, CY_Z2);
+  for(let x=CY_X1; x<=CY_X2+0.1; x+=POST_GAP) {
+    const px = Math.round(x*10)/10;
+    if(px > gateX1-0.15 && px < gateX2+0.15) continue;
+    addPost(px, CY_Z2);
+  }
+  addPost(gateX1-0.07, CY_Z2);
+  addPost(gateX2+0.07, CY_Z2);
+
+  // Poteaux de coin (angles de l'enceinte)
+  addPost(CY_X1, CY_Z1); addPost(CY_X2, CY_Z1);
+  addPost(CY_X1, CY_Z2); addPost(CY_X2, CY_Z2);
+
+  // ── PORTE CADENAS (vantail grillage sur mur arrière) ─────────────────
+  {
+    const gateTex = makeGrillageTex(24);
+    gateTex.repeat.set(GATE_W*1.4, FENCE_H*1.4);
+    const gLeafMat = new THREE.MeshLambertMaterial({
+      map:gateTex, transparent:true, opacity:0.88,
+      side:THREE.DoubleSide, color:0x1a7010
+    });
+    const gatePivot = new THREE.Group();
+    gatePivot.position.set(gateX1-0.04, 0, CY_Z2);
+    scene.add(gatePivot);
+    const gLeaf = new THREE.Mesh(new THREE.PlaneGeometry(GATE_W-0.10, FENCE_H-0.08), gLeafMat);
+    gLeaf.position.set((GATE_W-0.10)/2, (FENCE_H-0.08)/2, 0.0);
+    gatePivot.add(gLeaf);
+    const gfV = new THREE.BoxGeometry(0.08, FENCE_H, 0.08);
+    const gfH = new THREE.BoxGeometry(GATE_W+0.02, 0.08, 0.08);
+    [0.04, GATE_W-0.04].forEach(dx=>{
+      const b = new THREE.Mesh(gfV, mGateMetal);
+      b.position.set(dx, FENCE_H/2, 0); gatePivot.add(b);
+    });
+    [FENCE_H-0.04, FENCE_H/2, 0.04].forEach(dy=>{
+      const b = new THREE.Mesh(gfH, mGateMetal);
+      b.position.set(GATE_W/2, dy, 0); gatePivot.add(b);
+    });
+  }
+
+  // ── CADENAS doré sur la porte ─────────────────────────────────────────
+  const fencePadlock = new THREE.Group();
+  fencePadlock.position.set(GATE_X+0.12, 1.10, CY_Z2+0.07);
+  scene.add(fencePadlock);
+  const fplBody = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.18, 0.12), mFenceGold);
+  fplBody.position.set(0,0,0); fencePadlock.add(fplBody);
+  const fplTop = new THREE.Mesh(new THREE.CylinderGeometry(0.065,0.065,0.12,10), mFenceGold);
+  fplTop.rotation.x=Math.PI/2; fplTop.position.set(0,0.09,0); fencePadlock.add(fplTop);
+  const fplArc = new THREE.Mesh(new THREE.TorusGeometry(0.052,0.020,8,10,Math.PI), mFenceGoldDk);
+  fplArc.rotation.x=Math.PI/2; fplArc.position.set(0,0.21,0); fencePadlock.add(fplArc);
+  const fplHole = new THREE.Mesh(new THREE.CircleGeometry(0.030,8), new THREE.MeshLambertMaterial({color:0x080808}));
+  fplHole.position.set(0,0,0.063); fencePadlock.add(fplHole);
+
+  // ── Sol herbe à l'intérieur de la cour ────────────────────────────────
+  const yardW = CY_X2 - CY_X1;
+  const yardD = Math.abs(CY_Z2 - CY_Z1);
+  const yardGrass = new THREE.Mesh(
+    new THREE.PlaneGeometry(yardW, yardD),
+    new THREE.MeshLambertMaterial({color:0x3a7a18, map:grassTex.clone()})
+  );
+  yardGrass.rotation.x = -Math.PI/2;
+  yardGrass.position.set((CY_X1+CY_X2)/2, 0.008, (CY_Z1+CY_Z2)/2);
+  yardGrass.receiveShadow = true;
+  scene.add(yardGrass);
+}
+// ─── FIN COUR ARRIÈRE ──────────────────────────────────────────────────
+
 // ─── SYSTÈME DE COLLISION AABB ──────────────────────────────
 const PLAYER_R = 0.35;
 
@@ -4030,6 +4541,22 @@ sBox(-3.0, -19.9, -1.8, -18.9);
 sBox( 1.8, -19.9,  3.0, -18.9);
 
 // ════════════════════════════════════
+// COUR ARRIÈRE CLÔTURÉE
+// X=-27..+27, Z=-27.5..-147.5
+// Seule sortie = porte cadenas X≈17.46 sur mur arrière Z=-147.5
+// ════════════════════════════════════
+// Mur gauche (X=-27, Z=-147.5 → -27.5)
+sBox(-27.1, -147.5, -26.9, -27.5);
+// Mur droit (X=+27, Z=-147.5 → -27.5)
+sBox( 26.9, -147.5,  27.1, -27.5);
+// Mur arrière gauche (Z=-147.5, X=-27 → 16.66)
+sBox(-27.0, -147.6,  16.66, -147.4);
+// Porte cadenas : ouvrable (doorCollider 'fenceGate')
+dBox( 16.66, -147.6, 18.26, -147.4, 'fenceGate');
+// Mur arrière droit (Z=-147.5, X=18.26 → +27)
+sBox( 18.26, -147.6, 27.0, -147.4);
+
+// ════════════════════════════════════
 // ARBRES (troncs ~0.28 rayon)
 // ════════════════════════════════════
 const _tp = [];
@@ -4110,7 +4637,10 @@ function resolveCollisions(px, pz){
   return [px, pz];
 }
 
-const BOUNDS = { minX:-35.5, maxX:35.5, minZ:-35.3, maxZ:17 };
+const BOUNDS = { minX:-2000, maxX:2000, minZ:-2000, maxZ:20 };
+
+// Tracks whether player is outside the school compound
+let playerOutside = false;
 
 let last=0;
 function loop(ts){
@@ -4159,6 +4689,10 @@ function loop(ts){
       const currentY = camera.position.y;
       const onUpperFloor = currentY > 6.0;
 
+      // Si le joueur est complètement dehors du lycée, sol = 0
+      const outsideSchool = pz > 20 || pz < -150 || px < -40 || px > 40;
+      if(outsideSchool) return 0;
+
       // ── ESCALIER prioritaire ──
 
       // Volée 1 : Z=-27.6 → -33.6, côté gauche
@@ -4205,10 +4739,54 @@ function loop(ts){
     nz = Math.max(BOUNDS.minZ, Math.min(BOUNDS.maxZ, nz));
     camera.position.x = nx;
     camera.position.z = nz;
+
+    // Détecter si le joueur est sorti du lycée
+    const px2 = camera.position.x, pz2 = camera.position.z;
+    const inSchoolArea = px2 > -37 && px2 < 37 && pz2 > -150 && pz2 < 20;
+    playerOutside = !inSchoolArea;
+    document.getElementById('outsideIndicator').style.display = playerOutside ? 'block' : 'none';
+
+    // Mettre à jour les chunks si le joueur est dehors
+    if(playerOutside || pz2 < -130) {
+      updateChunks(px2, pz2);
+    }
+
+    // Animation oiseaux
+    birdFlock.forEach((b, i) => {
+      b.angle += (b.speed * 0.008 + i*0.001) * dt;
+      b.x = Math.sin(b.angle * 0.7 + b.phase) * b.radius + camera.position.x;
+      b.z = Math.cos(b.angle * 0.5 + b.phase) * b.radius + camera.position.z - 80;
+      b.y = 15 + Math.sin(b.angle*1.2) * 5 + i*2.5;
+      b.mesh.position.set(b.x, b.y, b.z);
+      b.mesh.rotation.y = b.angle * 0.7 + b.phase + Math.PI/2;
+      // Battement d'ailes
+      b.wingPhase += dt * 4;
+      const flap = Math.sin(b.wingPhase) * 0.4;
+      b.lw.rotation.z =  flap;
+      b.rw.rotation.z = -flap;
+    });
+    // Faire suivre le ciel au joueur
+    skySphere.position.set(camera.position.x, 0, camera.position.z);
   } else {
     if(jRy!==0) camera.position.y -= jRy*flySpeed*dt;
     camera.position.x = Math.max(BOUNDS.minX, Math.min(BOUNDS.maxX, camera.position.x));
     camera.position.z = Math.max(BOUNDS.minZ, Math.min(BOUNDS.maxZ, camera.position.z));
+    // Faire suivre le ciel au joueur (mode vol aussi)
+    skySphere.position.set(camera.position.x, 0, camera.position.z);
+    // Animation oiseaux en vol aussi
+    birdFlock.forEach((b, i) => {
+      b.angle += (b.speed * 0.008 + i*0.001) * dt;
+      b.x = Math.sin(b.angle * 0.7 + b.phase) * b.radius + camera.position.x;
+      b.z = Math.cos(b.angle * 0.5 + b.phase) * b.radius + camera.position.z - 80;
+      b.y = 15 + Math.sin(b.angle*1.2) * 5 + i*2.5;
+      b.mesh.position.set(b.x, b.y, b.z);
+      b.mesh.rotation.y = b.angle * 0.7 + b.phase + Math.PI/2;
+      b.wingPhase += dt * 4;
+      const flap = Math.sin(b.wingPhase) * 0.4;
+      b.lw.rotation.z =  flap;
+      b.rw.rotation.z = -flap;
+    });
+    if(camera.position.z < -130) updateChunks(camera.position.x, camera.position.z);
   }
   const dir=new THREE.Vector3(
     Math.sin(camYaw)*Math.cos(camPitch),
@@ -4518,7 +5096,7 @@ function updateCoordDisplay(){
 
 // ── Mini-carte ──────────────────────────────────────────
 const MAP_W=180, MAP_H=180;
-const WORLD_X1=-36, WORLD_X2=36, WORLD_Z1=-27, WORLD_Z2=18;
+const WORLD_X1=-36, WORLD_X2=36, WORLD_Z1=-155, WORLD_Z2=22;
 const WORLD_W=WORLD_X2-WORLD_X1, WORLD_D=WORLD_Z2-WORLD_Z1;
 
 function worldToMap(wx,wz){
@@ -4555,6 +5133,16 @@ function drawMinimap(){
   // Portail (ligne dorée en bas)
   ctx.strokeStyle='#d4a020'; ctx.lineWidth=2;
   {const[a,b]=worldToMap(-8,18);const[c,d]=worldToMap(8,18);ctx.beginPath();ctx.moveTo(a,b);ctx.lineTo(c,d);ctx.stroke();}
+
+  // Cour arrière clôturée (herbe verte derrière bâtiment)
+  ctx.fillStyle='#1e5a0a';
+  {const[a,b]=worldToMap(-27,-147.5);const[c,d]=worldToMap(27,-27.5);ctx.fillRect(a,b,c-a,d-b);}
+  // Contour clôture cour arrière
+  ctx.strokeStyle='#3a8020'; ctx.lineWidth=1.5;
+  {const[a,b]=worldToMap(-27,-147.5);const[c,d]=worldToMap(27,-27.5);ctx.strokeRect(a,b,c-a,d-b);}
+  // Porte cadenas (point doré)
+  ctx.fillStyle='#d4a020';
+  {const[a,b]=worldToMap(17.46,-147.5);ctx.beginPath();ctx.arc(a,b,2.5,0,Math.PI*2);ctx.fill();}
 
   // Grille fine
   ctx.strokeStyle='rgba(120,100,60,0.12)'; ctx.lineWidth=0.5;
