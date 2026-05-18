@@ -1152,20 +1152,20 @@ lamp(-16,-2); lamp(16,-2); lamp(-16,-18); lamp(16,-18);
 // Données des classes
 const classData = [
   {
-    title: "Classe de 5e A",
-    students: ["Bernard Chloé","Petit Thomas","Lambert Sarah","Moreau Lucas","Rivière Emma"]
+    title: "Classe A",
+    students: ["Julien Moreau","Camille Bernard","Antoine Lefèvre","Sophie Laurent","Darsen Lucy","Hugo Martin","Clara Dubois","Nathan Petit"]
   },
   {
-    title: "Classe de 5e B",
-    students: ["Bellamy Clem","Durand Léa","Fournier Nathan","Gauthier Zoé","Lefèvre Manon","Dubois Hugo","Rousseau Clara","Leroy Inès"]
+    title: "Classe B",
+    students: ["Élodie Garnier","Maxime Roux","Léa Fontaine","Thomas Chevalier","Inès Mercier","Lucas Girard","Manon Faure","Alexis Renault"]
   },
   {
-    title: "Classe de 5e C",
-    students: ["Girard Camille","Vincent Maxime","Rolland Sarah","Simon Paul","Michel Lucie"]
+    title: "Classe C",
+    students: ["Chloé Lambert","Gabriel Simon","Emma Renaud","Victor Blanchard","Bellamy Clematis","Sarah Noël","Enzo Perrin","Julie Caron"]
   },
   {
-    title: "Classe de 5e D",
-    students: ["Darsen Lucy","Blanchard Julia","Marchand Enzo","Chevalier Morgane","Colin Axelle"]
+    title: "Classe D",
+    students: ["Mathis Olivier","Jade Picard","Arthur Pascal","Zoé Marchand","Louis Gauthier","Anaïs Leroy","Quentin Meyer","Pauline Roche"]
   }
 ];
 
@@ -3075,6 +3075,181 @@ function drawJoy(id,dx,dy){
     wire.position.set(rCX, rCeilY - 0.15, lz);
     scene.add(wire);
   });
+}
+
+// ═══════════════════════════════════════════════════════
+// ─── MOBILIER DES 4 SALLES DE CLASSE ──────────────────
+// Chaque salle contient :
+//   • 1 tableau noir sur le mur du fond (Z=-27)
+//   • 1 bureau du professeur face aux élèves
+//   • N pupitres élèves + chaises (N = nombre d'élèves sur le tableau extérieur)
+// ═══════════════════════════════════════════════════════
+{
+  const mDesk      = new THREE.MeshLambertMaterial({color:0x9c6a30}); // bois bureau
+  const mDesktop   = new THREE.MeshLambertMaterial({color:0xc8a050}); // dessus bureau
+  const mChair     = new THREE.MeshLambertMaterial({color:0x5a4220}); // bois chaise
+  const mChairSeat = new THREE.MeshLambertMaterial({color:0x2a5080}); // assise bleue élèves
+  const mBlackboard= new THREE.MeshLambertMaterial({color:0x1a2a1a}); // vert foncé tableau
+  const mBBFrame   = new THREE.MeshLambertMaterial({color:0x3a2a10}); // cadre tableau
+  const mChalk     = new THREE.MeshLambertMaterial({color:0xe8e8e8}); // craie blanche
+  const mProfDesk  = new THREE.MeshLambertMaterial({color:0x6a3a10}); // bois bureau prof
+  const mProfTop   = new THREE.MeshLambertMaterial({color:0x8a5a20}); // dessus bureau prof
+  const mProfChair = new THREE.MeshLambertMaterial({color:0x1a3060}); // chaise prof bleu foncé
+
+  // ── Fonction : tableau noir mural (face vers Z+, monté sur le mur Z=rZfront) ──
+  function makeMuralBoard(cx, cy, cz, W, H) {
+    // Corps tableau
+    const b = new THREE.Mesh(new THREE.BoxGeometry(W, H, 0.08), mBlackboard);
+    b.position.set(cx, cy, cz); b.castShadow=true; scene.add(b);
+    // Cadre
+    [ [W+0.12, 0.08, cz+0.06, cy+H/2+0.04, 0], // haut
+      [W+0.12, 0.08, cz+0.06, cy-H/2-0.04, 0], // bas
+      [0.08, H+0.12, cz+0.06, cy, cx-W/2-0.04], // gauche
+      [0.08, H+0.12, cz+0.06, cy, cx+W/2+0.04]  // droite
+    ].forEach(([fw, fh, fz, fy, fx]) => {
+      const f = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, 0.06), mBBFrame);
+      f.position.set(fx !== undefined ? fx : cx, fy, fz); scene.add(f);
+    });
+    // Ligne de craie
+    const chalk = new THREE.Mesh(new THREE.BoxGeometry(W*0.6, 0.04, 0.03), mChalk);
+    chalk.position.set(cx, cy + H*0.1, cz + 0.06); scene.add(chalk);
+    // Tablette de craies en bas
+    const tray = new THREE.Mesh(new THREE.BoxGeometry(W*0.4, 0.06, 0.10), mBBFrame);
+    tray.position.set(cx, cy-H/2+0.06, cz+0.10); scene.add(tray);
+  }
+
+  // ── Fonction : bureau prof (orienté face aux élèves, devant le tableau) ──
+  // posX, floorY, posZ = centre du bureau, ry = rotation Y
+  function makeProfDesk(posX, floorY, posZ, ry=0) {
+    const g = new THREE.Group();
+    g.position.set(posX, floorY, posZ); g.rotation.y = ry; scene.add(g);
+    const gbox = (w,h,d,mat,px,py,pz) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+      m.position.set(px,py,pz); m.castShadow=true; g.add(m);
+    };
+    // Pieds
+    [-0.6,0.6].forEach(dx => [-0.25,0.25].forEach(dz => gbox(0.06,0.72,0.06,mProfDesk,dx,0.36,dz)));
+    // Panneau latéral gauche
+    gbox(0.04, 0.72, 0.54, mProfDesk, -0.62, 0.36, 0);
+    // Panneau frontal
+    gbox(1.28, 0.50, 0.04, mProfDesk, 0, 0.36, 0.27);
+    // Tiroir décoratif
+    gbox(0.38, 0.18, 0.04, new THREE.MeshLambertMaterial({color:0x7a4a18}), -0.3, 0.55, 0.28);
+    gbox(0.12, 0.03, 0.03, new THREE.MeshLambertMaterial({color:0xd4a020}), -0.3, 0.55, 0.30); // poignée
+    // Dessus
+    gbox(1.40, 0.06, 0.60, mProfTop, 0, 0.75, 0);
+    // Chaise prof
+    const cg = new THREE.Group();
+    cg.position.set(posX, floorY, posZ); cg.rotation.y = ry; scene.add(cg);
+    const cgb = (w,h,d,mat,px,py,pz) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+      m.position.set(px,py,pz); m.castShadow=true; cg.add(m);
+    };
+    [-0.18,0.18].forEach(dx => [-0.18,0.18].forEach(dz => cgb(0.05,0.44,0.05,mProfDesk,dx,0.22,dz-0.60)));
+    cgb(0.46, 0.06, 0.44, mProfChair, 0, 0.47, -0.60);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.44,0.38,0.05), mProfChair);
+    back.position.set(0, 0.70, -0.79); back.rotation.x=-0.12; cg.add(back);
+    // Livre sur le bureau
+    const book = new THREE.Mesh(new THREE.BoxGeometry(0.28,0.04,0.20), new THREE.MeshLambertMaterial({color:0xc04020}));
+    book.position.set(posX+0.30, floorY+0.78, posZ-0.05); scene.add(book);
+  }
+
+  // ── Fonction : pupitre élève + chaise ──
+  function makePupitreEleve(posX, floorY, posZ) {
+    const g = new THREE.Group();
+    g.position.set(posX, floorY, posZ); scene.add(g);
+    const gbox = (w,h,d,mat,px,py,pz) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+      m.position.set(px,py,pz); m.castShadow=true; g.add(m);
+    };
+    // Pieds pupitre
+    [-0.30,0.30].forEach(dx => [-0.20,0.20].forEach(dz => gbox(0.05,0.66,0.05,mDesk,dx,0.33,dz)));
+    // Plateau incliné légèrement
+    const top = new THREE.Mesh(new THREE.BoxGeometry(0.68,0.04,0.48), mDesktop);
+    top.position.set(0, 0.68, 0); top.rotation.x = -0.08; g.add(top); top.castShadow=true;
+    // Barre de support
+    gbox(0.68, 0.04, 0.04, mDesk, 0, 0.45, -0.18);
+    // Chaise
+    const cg = new THREE.Group();
+    cg.position.set(posX, floorY, posZ+0.48); scene.add(cg);
+    const cgb = (w,h,d,mat,px,py,pz) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+      m.position.set(px,py,pz); m.castShadow=true; cg.add(m);
+    };
+    [-0.15,0.15].forEach(dx => [-0.15,0.15].forEach(dz => cgb(0.04,0.40,0.04,mChair,dx,0.20,dz)));
+    cgb(0.38, 0.05, 0.36, mChairSeat, 0, 0.42, 0);
+    const back2 = new THREE.Mesh(new THREE.BoxGeometry(0.36,0.30,0.04), mChairSeat);
+    back2.position.set(0, 0.60, -0.19); back2.rotation.x=-0.15; cg.add(back2);
+  }
+
+  // ── Fonction : place les N pupitres d'une salle en rangées face au tableau ──
+  // Le tableau est sur le mur Z=rZfront (face vers Z+)
+  // Les pupitres font face au tableau (vers Z-), rangée depuis Z = boardFaceZ + offset
+  function placePupitres(nEleves, roomCX, roomFloorY, roomZfront, roomZback, roomXmin, roomXmax, boardFaceZ) {
+    // Grille : max 3 colonnes, puis on augmente les rangées
+    const cols = nEleves <= 3 ? nEleves : (nEleves <= 6 ? Math.ceil(nEleves/2) : 3);
+    const rows = Math.ceil(nEleves / cols);
+    const spacingX = 1.10, spacingZ = 1.30;
+    const startX = roomCX - (cols-1) * spacingX / 2;
+    const startZ = boardFaceZ + 2.0; // 2m devant le tableau
+
+    let n = 0;
+    for(let r = 0; r < rows && n < nEleves; r++) {
+      for(let c = 0; c < cols && n < nEleves; c++) {
+        const px = startX + c * spacingX;
+        const pz = startZ + r * spacingZ;
+        makePupitreEleve(px, roomFloorY, pz);
+        n++;
+      }
+    }
+  }
+
+  // ═══════════════════════════════════
+  // ─── CLASSE 5e D — RDC, droite (X=27→36, Z=-27→18, Y=0) ──
+  // 8 élèves
+  // ═══════════════════════════════════
+  {
+    const cx=31.5, cy=0, zFront=-27, zBack=18;
+    // Tableau noir sur le mur Z=-27 (face intérieure du mur, décalé vers Z+)
+    makeMuralBoard(cx, cy+2.40, zFront+0.12, 3.80, 1.40);
+    // Bureau prof (entre tableau et élèves, orienté face aux élèves vers Z+)
+    makeProfDesk(cx, cy, zFront+1.80, 0);
+    // Pupitres : 8 élèves
+    placePupitres(8, cx, cy, zFront, zBack, 27, 36, zFront+1.80);
+  }
+
+  // ═══════════════════════════════════
+  // ─── CLASSE 5e C — RDC, gauche (X=-36→-27, Z=-27→18, Y=0) ──
+  // 8 élèves
+  // ═══════════════════════════════════
+  {
+    const cx=-31.5, cy=0, zFront=-27, zBack=18;
+    makeMuralBoard(cx, cy+2.40, zFront+0.12, 3.80, 1.40);
+    makeProfDesk(cx, cy, zFront+1.80, 0);
+    placePupitres(8, cx, cy, zFront, zBack, -36, -27, zFront+1.80);
+  }
+
+  // ═══════════════════════════════════
+  // ─── CLASSE 5e A — 1er étage, droite (X=27→36, Z=-27→18, Y=5) ──
+  // 8 élèves
+  // ═══════════════════════════════════
+  {
+    const cx=31.5, cy=5, zFront=-27, zBack=18;
+    makeMuralBoard(cx, cy+2.40, zFront+0.12, 3.80, 1.40);
+    makeProfDesk(cx, cy, zFront+1.80, 0);
+    placePupitres(8, cx, cy, zFront, zBack, 27, 36, zFront+1.80);
+  }
+
+  // ═══════════════════════════════════
+  // ─── CLASSE 5e B — 1er étage, gauche (X=-36→-27, Z=-27→18, Y=5) ──
+  // 8 élèves
+  // ═══════════════════════════════════
+  {
+    const cx=-31.5, cy=5, zFront=-27, zBack=18;
+    makeMuralBoard(cx, cy+2.40, zFront+0.12, 3.80, 1.40);
+    makeProfDesk(cx, cy, zFront+1.80, 0);
+    placePupitres(8, cx, cy, zFront, zBack, -36, -27, zFront+1.80);
+  }
 }
 
 // ═══════════════════════════════════════════════════════
