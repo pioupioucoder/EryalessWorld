@@ -3082,179 +3082,394 @@ function drawJoy(id,dx,dy){
 }
 
 // ═══════════════════════════════════════════════════════
-// ─── MOBILIER DES 4 SALLES DE CLASSE ──────────────────
-// Chaque salle contient :
-//   • 1 tableau noir sur le mur du fond (Z=-27)
-//   • 1 bureau du professeur face aux élèves
-//   • N pupitres élèves + chaises (N = nombre d'élèves sur le tableau extérieur)
+// ─── MOBILIER INTERACTIF DES 4 SALLES DE CLASSE ───────
 // ═══════════════════════════════════════════════════════
+
+// Salles : X=27→36 (D/A droite) et X=-36→-27 (C/B gauche), Z=-27→18
+// Porte à Z≈15.8, côté X=±27 → on entre depuis Z=15 vers Z=-27 (fond)
+// Tableau sur le mur fond Z=-27, casiers près de l'entrée Z≈12→16
+
+const classroomStates = {};
+const interactables   = [];
+const classroomLights = {};
+const chalkBoards     = {};
+
+// Noms élèves par roomId
+const roomStudents = {
+  classeA: classData[0].students,
+  classeB: classData[1].students,
+  classeC: classData[2].students,
+  classeD: classData[3].students,
+};
+
 {
-  const mDesk      = new THREE.MeshLambertMaterial({color:0x9c6a30}); // bois bureau
-  const mDesktop   = new THREE.MeshLambertMaterial({color:0xc8a050}); // dessus bureau
-  const mChair     = new THREE.MeshLambertMaterial({color:0x5a4220}); // bois chaise
-  const mChairSeat = new THREE.MeshLambertMaterial({color:0x2a5080}); // assise bleue élèves
-  const mBlackboard= new THREE.MeshLambertMaterial({color:0x1a2a1a}); // vert foncé tableau
-  const mBBFrame   = new THREE.MeshLambertMaterial({color:0x3a2a10}); // cadre tableau
-  const mChalk     = new THREE.MeshLambertMaterial({color:0xe8e8e8}); // craie blanche
-  const mProfDesk  = new THREE.MeshLambertMaterial({color:0x6a3a10}); // bois bureau prof
-  const mProfTop   = new THREE.MeshLambertMaterial({color:0x8a5a20}); // dessus bureau prof
-  const mProfChair = new THREE.MeshLambertMaterial({color:0x1a3060}); // chaise prof bleu foncé
+  // ── Matériaux ──
+  const mDesk    = new THREE.MeshLambertMaterial({color:0x8B5E2A});
+  const mDeskTop = new THREE.MeshLambertMaterial({color:0xC49A38});
+  const mChairWd = new THREE.MeshLambertMaterial({color:0x5a3a18});
+  const mChairBl = new THREE.MeshLambertMaterial({color:0x1a3a70});
+  const mBBframe = new THREE.MeshLambertMaterial({color:0x2a1a08});
+  const mChalkMt = new THREE.MeshLambertMaterial({color:0xf0f0ee});
+  const mPrfDesk = new THREE.MeshLambertMaterial({color:0x5a2e08});
+  const mPrfTop  = new THREE.MeshLambertMaterial({color:0x7a4a18});
+  const mLocker  = new THREE.MeshLambertMaterial({color:0xdde0e4});
+  const mLockDr  = new THREE.MeshLambertMaterial({color:0xeef0f2});
+  const mHandle  = new THREE.MeshLambertMaterial({color:0xc8a820});
+  const mSwitch  = new THREE.MeshLambertMaterial({color:0xe8e4d8});
+  const mSwitchO = new THREE.MeshLambertMaterial({color:0xffee70});
+  const mNeon    = new THREE.MeshLambertMaterial({color:0xffffee,emissive:0xffffaa,emissiveIntensity:1.0});
+  const mNeonOff = new THREE.MeshLambertMaterial({color:0x888880,emissive:0x000000,emissiveIntensity:0});
 
-  // ── Fonction : tableau noir mural (face vers Z+, monté sur le mur Z=rZfront) ──
-  function makeMuralBoard(cx, cy, cz, W, H) {
-    // Corps tableau
-    const b = new THREE.Mesh(new THREE.BoxGeometry(W, H, 0.08), mBlackboard);
-    b.position.set(cx, cy, cz); b.castShadow=true; scene.add(b);
-    // Cadre
-    [ [W+0.12, 0.08, cz+0.06, cy+H/2+0.04, 0], // haut
-      [W+0.12, 0.08, cz+0.06, cy-H/2-0.04, 0], // bas
-      [0.08, H+0.12, cz+0.06, cy, cx-W/2-0.04], // gauche
-      [0.08, H+0.12, cz+0.06, cy, cx+W/2+0.04]  // droite
-    ].forEach(([fw, fh, fz, fy, fx]) => {
-      const f = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, 0.06), mBBFrame);
-      f.position.set(fx !== undefined ? fx : cx, fy, fz); scene.add(f);
+  // ── Texture nom sur casier ──
+  function makeLockerTex(name) {
+    const c = document.createElement('canvas'); c.width=256; c.height=128;
+    const x = c.getContext('2d');
+    x.fillStyle='#eef0f2'; x.fillRect(0,0,256,128);
+    x.strokeStyle='#aab0b8'; x.lineWidth=3; x.strokeRect(4,4,248,120);
+    x.fillStyle='#1a1a2a';
+    const parts = name.split(' ');
+    x.font='bold 28px Arial,sans-serif'; x.textAlign='center';
+    x.fillText(parts[0]||'', 128, 50);
+    x.font='22px Arial,sans-serif';
+    x.fillText(parts[1]||'', 128, 84);
+    // petite étoile déco
+    x.font='18px Arial'; x.fillText('★', 128, 112);
+    return new THREE.CanvasTexture(c);
+  }
+
+  // ── Tableau noir interactif ──
+  function makeBoard(cx, floorY, cz, W, H, roomId) {
+    const bc = document.createElement('canvas'); bc.width=1024; bc.height=512;
+    const bx = bc.getContext('2d');
+    bx.fillStyle='#1a2e1a'; bx.fillRect(0,0,1024,512);
+    const tex = new THREE.CanvasTexture(bc);
+    const mat = new THREE.MeshLambertMaterial({map:tex});
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(W,H,0.12), mat);
+    mesh.position.set(cx, floorY+H/2+0.8, cz+0.07);
+    mesh.castShadow=true; scene.add(mesh);
+    // Cadre bois
+    [[W+0.2,0.14,cx,floorY+H+0.87,cz+0.09],
+     [W+0.2,0.14,cx,floorY+0.73,cz+0.09],
+     [0.14,H+0.2,cx-W/2-0.09,floorY+H/2+0.80,cz+0.09],
+     [0.14,H+0.2,cx+W/2+0.09,floorY+H/2+0.80,cz+0.09]
+    ].forEach(([fw,fh,fx,fy,fz])=>{
+      const f=new THREE.Mesh(new THREE.BoxGeometry(fw,fh,0.10),mBBframe);
+      f.position.set(fx,fy,fz); scene.add(f);
     });
-    // Ligne de craie
-    const chalk = new THREE.Mesh(new THREE.BoxGeometry(W*0.6, 0.04, 0.03), mChalk);
-    chalk.position.set(cx, cy + H*0.1, cz + 0.06); scene.add(chalk);
-    // Tablette de craies en bas
-    const tray = new THREE.Mesh(new THREE.BoxGeometry(W*0.4, 0.06, 0.10), mBBFrame);
-    tray.position.set(cx, cy-H/2+0.06, cz+0.10); scene.add(tray);
+    // Tablette + craie
+    const tray=new THREE.Mesh(new THREE.BoxGeometry(W*0.6,0.08,0.14),mBBframe);
+    tray.position.set(cx,floorY+0.72,cz+0.14); scene.add(tray);
+    const chalk=new THREE.Mesh(new THREE.BoxGeometry(0.30,0.07,0.07),mChalkMt);
+    chalk.position.set(cx-0.5,floorY+0.80,cz+0.18); scene.add(chalk);
+    chalkBoards[roomId]={canvas:bc,ctx:bx,tex,mesh,cx,cz:cz+0.07,W,H,floorY};
+    interactables.push({mesh,type:'blackboard',roomId,data:chalkBoards[roomId]});
   }
 
-  // ── Fonction : bureau prof (orienté face aux élèves, devant le tableau) ──
-  // posX, floorY, posZ = centre du bureau, ry = rotation Y
-  function makeProfDesk(posX, floorY, posZ, ry=0) {
-    const g = new THREE.Group();
-    g.position.set(posX, floorY, posZ); g.rotation.y = ry; scene.add(g);
-    const gbox = (w,h,d,mat,px,py,pz) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
-      m.position.set(px,py,pz); m.castShadow=true; g.add(m);
-    };
-    // Pieds
-    [-0.6,0.6].forEach(dx => [-0.25,0.25].forEach(dz => gbox(0.06,0.72,0.06,mProfDesk,dx,0.36,dz)));
-    // Panneau latéral gauche
-    gbox(0.04, 0.72, 0.54, mProfDesk, -0.62, 0.36, 0);
-    // Panneau frontal
-    gbox(1.28, 0.50, 0.04, mProfDesk, 0, 0.36, 0.27);
-    // Tiroir décoratif
-    gbox(0.38, 0.18, 0.04, new THREE.MeshLambertMaterial({color:0x7a4a18}), -0.3, 0.55, 0.28);
-    gbox(0.12, 0.03, 0.03, new THREE.MeshLambertMaterial({color:0xd4a020}), -0.3, 0.55, 0.30); // poignée
-    // Dessus
-    gbox(1.40, 0.06, 0.60, mProfTop, 0, 0.75, 0);
+  // ── Pupitre élève (grande taille, chaise face au tableau) ──
+  function makePupitre(px, floorY, pz, roomId, idx) {
+    // Chaise d'abord, derrière le bureau (vers Z+, soit vers la porte)
+    const chairZ = pz + 0.75;
+    const cg = new THREE.Group(); cg.position.set(px, floorY, chairZ); scene.add(cg);
+    const cb=(w,h,d,mat,x,y,z)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(x,y,z);m.castShadow=true;cg.add(m);};
+    [-0.24,0.24].forEach(dx=>[-0.24,0.24].forEach(dz=>cb(0.07,0.80,0.07,mChairWd,dx,0.40,dz)));
+    cb(0.62,0.07,0.56,mChairBl,0,0.84,0); // assise
+    const bk=new THREE.Mesh(new THREE.BoxGeometry(0.60,0.52,0.07),mChairBl);
+    bk.position.set(0,1.16,-0.27); bk.rotation.x=-0.12; cg.add(bk);
+    [-0.27,0.27].forEach(dx=>cb(0.06,0.52,0.06,mChairWd,dx,1.16,-0.27));
+    // Interactable s'asseoir
+    interactables.push({mesh:cg,type:'chair',roomId,index:idx,
+      data:{seatX:px,seatY:floorY+0.90,seatZ:chairZ}});
+
+    // Bureau
+    const dg = new THREE.Group(); dg.position.set(px, floorY, pz); scene.add(dg);
+    const db=(w,h,d,mat,x,y,z)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(x,y,z);m.castShadow=true;dg.add(m);};
+    const mMet=new THREE.MeshLambertMaterial({color:0x909090});
+    [-0.34,0.34].forEach(dx=>{db(0.06,0.80,0.06,mMet,dx,0.40,-0.24);db(0.06,0.80,0.06,mMet,dx,0.40,0.24);});
+    db(0.72,0.05,0.56,mDeskTop,0,0.82,0); // plateau
+    db(0.72,0.04,0.04,mMet,0,0.16,0);     // barre basse
+  }
+
+  // ── Bureau prof ──
+  function makeProfDesk(px, floorY, pz) {
+    const g=new THREE.Group(); g.position.set(px,floorY,pz); scene.add(g);
+    const gb=(w,h,d,mat,x,y,z)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(x,y,z);m.castShadow=true;g.add(m);};
+    gb(0.07,0.82,0.75,mPrfDesk,-0.78,0.41,0);
+    gb(0.07,0.82,0.75,mPrfDesk, 0.78,0.41,0);
+    gb(1.62,0.56,0.06,mPrfDesk,0,0.38,0.37);
+    [-0.40,0.40].forEach(dx=>{gb(0.38,0.18,0.06,new THREE.MeshLambertMaterial({color:0x7a4a18}),dx,0.56,0.38);gb(0.10,0.04,0.05,mHandle,dx,0.56,0.41);});
+    gb(1.65,0.07,0.78,mPrfTop,0,0.83,0);
     // Chaise prof
-    const cg = new THREE.Group();
-    cg.position.set(posX, floorY, posZ); cg.rotation.y = ry; scene.add(cg);
-    const cgb = (w,h,d,mat,px,py,pz) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
-      m.position.set(px,py,pz); m.castShadow=true; cg.add(m);
-    };
-    [-0.18,0.18].forEach(dx => [-0.18,0.18].forEach(dz => cgb(0.05,0.44,0.05,mProfDesk,dx,0.22,dz-0.60)));
-    cgb(0.46, 0.06, 0.44, mProfChair, 0, 0.47, -0.60);
-    const back = new THREE.Mesh(new THREE.BoxGeometry(0.44,0.38,0.05), mProfChair);
-    back.position.set(0, 0.70, -0.79); back.rotation.x=-0.12; cg.add(back);
-    // Livre sur le bureau
-    const book = new THREE.Mesh(new THREE.BoxGeometry(0.28,0.04,0.20), new THREE.MeshLambertMaterial({color:0xc04020}));
-    book.position.set(posX+0.30, floorY+0.78, posZ-0.05); scene.add(book);
+    const cg=new THREE.Group(); cg.position.set(px,floorY,pz-0.85); scene.add(cg);
+    const cb=(w,h,d,mat,x,y,z)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);m.position.set(x,y,z);m.castShadow=true;cg.add(m);};
+    [-0.24,0.24].forEach(dx=>[-0.24,0.24].forEach(dz=>cb(0.07,0.80,0.07,mChairWd,dx,0.40,dz)));
+    cb(0.62,0.07,0.56,new THREE.MeshLambertMaterial({color:0x0f2050}),0,0.84,0);
+    const bkp=new THREE.Mesh(new THREE.BoxGeometry(0.60,0.52,0.07),new THREE.MeshLambertMaterial({color:0x0f2050}));
+    bkp.position.set(0,1.16,0.27); bkp.rotation.x=0.12; cg.add(bkp);
+    interactables.push({mesh:cg,type:'chair',roomId:'prof',index:-1,data:{seatX:px,seatY:floorY+0.90,seatZ:pz-0.85}});
   }
 
-  // ── Fonction : pupitre élève + chaise ──
-  function makePupitreEleve(posX, floorY, posZ) {
-    const g = new THREE.Group();
-    g.position.set(posX, floorY, posZ); scene.add(g);
-    const gbox = (w,h,d,mat,px,py,pz) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
-      m.position.set(px,py,pz); m.castShadow=true; g.add(m);
-    };
-    // Pieds pupitre
-    [-0.30,0.30].forEach(dx => [-0.20,0.20].forEach(dz => gbox(0.05,0.66,0.05,mDesk,dx,0.33,dz)));
-    // Plateau incliné légèrement
-    const top = new THREE.Mesh(new THREE.BoxGeometry(0.68,0.04,0.48), mDesktop);
-    top.position.set(0, 0.68, 0); top.rotation.x = -0.08; g.add(top); top.castShadow=true;
-    // Barre de support
-    gbox(0.68, 0.04, 0.04, mDesk, 0, 0.45, -0.18);
-    // Chaise
-    const cg = new THREE.Group();
-    cg.position.set(posX, floorY, posZ+0.48); scene.add(cg);
-    const cgb = (w,h,d,mat,px,py,pz) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
-      m.position.set(px,py,pz); m.castShadow=true; cg.add(m);
-    };
-    [-0.15,0.15].forEach(dx => [-0.15,0.15].forEach(dz => cgb(0.04,0.40,0.04,mChair,dx,0.20,dz)));
-    cgb(0.38, 0.05, 0.36, mChairSeat, 0, 0.42, 0);
-    const back2 = new THREE.Mesh(new THREE.BoxGeometry(0.36,0.30,0.04), mChairSeat);
-    back2.position.set(0, 0.60, -0.19); back2.rotation.x=-0.15; cg.add(back2);
-  }
-
-  // ── Fonction : place les N pupitres d'une salle en rangées face au tableau ──
-  // Le tableau est sur le mur Z=rZfront (face vers Z+)
-  // Les pupitres font face au tableau (vers Z-), rangée depuis Z = boardFaceZ + offset
-  function placePupitres(nEleves, roomCX, roomFloorY, roomZfront, roomZback, roomXmin, roomXmax, boardFaceZ) {
-    // Grille : max 3 colonnes, puis on augmente les rangées
-    const cols = nEleves <= 3 ? nEleves : (nEleves <= 6 ? Math.ceil(nEleves/2) : 3);
-    const rows = Math.ceil(nEleves / cols);
-    const spacingX = 1.10, spacingZ = 1.30;
-    const startX = roomCX - (cols-1) * spacingX / 2;
-    const startZ = boardFaceZ + 2.0; // 2m devant le tableau
-
-    let n = 0;
-    for(let r = 0; r < rows && n < nEleves; r++) {
-      for(let c = 0; c < cols && n < nEleves; c++) {
-        const px = startX + c * spacingX;
-        const pz = startZ + r * spacingZ;
-        makePupitreEleve(px, roomFloorY, pz);
-        n++;
-      }
+  // ── Casier avec nom ──
+  function makeLocker(px, floorY, pz, name, roomId, idx) {
+    const g=new THREE.Group(); g.position.set(px,floorY,pz); scene.add(g);
+    const W=0.52,H=1.90,D=0.45;
+    // Corps
+    const body=new THREE.Mesh(new THREE.BoxGeometry(W,H,D),mLocker);
+    body.position.set(0,H/2,0); body.castShadow=true; g.add(body);
+    // Étagère interne
+    const shelf=new THREE.Mesh(new THREE.BoxGeometry(W-0.08,0.03,D-0.08),new THREE.MeshLambertMaterial({color:0xc0c4c8}));
+    shelf.position.set(0,H*0.58,0); g.add(shelf);
+    // Porte avec nom (pivot sur côté gauche de la porte)
+    const dp=new THREE.Group(); dp.position.set(-W/2,H/2,D/2); g.add(dp);
+    const lockerNameTex = makeLockerTex(name);
+    const doorMat = new THREE.MeshLambertMaterial({map:lockerNameTex});
+    const door=new THREE.Mesh(new THREE.BoxGeometry(W,H,0.045),doorMat);
+    door.position.set(W/2,0,0.01); dp.add(door);
+    // Poignée
+    const hnd=new THREE.Mesh(new THREE.BoxGeometry(0.06,0.16,0.06),mHandle);
+    hnd.position.set(W-0.06,0.10,0.05); dp.add(hnd);
+    // Ventilation (fentes)
+    for(let i=0;i<4;i++){
+      const v=new THREE.Mesh(new THREE.BoxGeometry(W*0.55,0.025,0.01),new THREE.MeshLambertMaterial({color:0xaab0b8}));
+      v.position.set(W/2,-0.30+i*0.14,0.024); dp.add(v);
     }
+    const lockerData={dp,isOpen:false,roomId,idx};
+    interactables.push({mesh:door,type:'locker',roomId,data:lockerData});
+    return lockerData;
   }
 
-  // ═══════════════════════════════════
-  // ─── CLASSE 5e D — RDC, droite (X=27→36, Z=-27→18, Y=0) ──
-  // 8 élèves
-  // ═══════════════════════════════════
-  {
-    const cx=31.5, cy=0, zFront=-27, zBack=18;
-    // Tableau noir sur le mur Z=-27 (face intérieure du mur, décalé vers Z+)
-    makeMuralBoard(cx, cy+2.40, zFront+0.12, 3.80, 1.40);
-    // Bureau prof (entre tableau et élèves, orienté face aux élèves vers Z+)
-    makeProfDesk(cx, cy, zFront+1.80, 0);
-    // Pupitres : 8 élèves
-    placePupitres(8, cx, cy, zFront, zBack, 27, 36, zFront+1.80);
+  // ── Interrupteur ──
+  function makeSwitch(px, floorY, pz, roomId, ry=0) {
+    const g=new THREE.Group(); g.position.set(px,floorY+1.35,pz); g.rotation.y=ry; scene.add(g);
+    const plate=new THREE.Mesh(new THREE.BoxGeometry(0.15,0.24,0.04),mSwitch); plate.castShadow=true; g.add(plate);
+    const btn=new THREE.Mesh(new THREE.BoxGeometry(0.08,0.11,0.05),mSwitch); btn.position.set(0,0,0.02); g.add(btn);
+    interactables.push({mesh:btn,type:'lightswitch',roomId,data:{btn,switchGroup:g}});
   }
 
-  // ═══════════════════════════════════
-  // ─── CLASSE 5e C — RDC, gauche (X=-36→-27, Z=-27→18, Y=0) ──
-  // 8 élèves
-  // ═══════════════════════════════════
-  {
-    const cx=-31.5, cy=0, zFront=-27, zBack=18;
-    makeMuralBoard(cx, cy+2.40, zFront+0.12, 3.80, 1.40);
-    makeProfDesk(cx, cy, zFront+1.80, 0);
-    placePupitres(8, cx, cy, zFront, zBack, -36, -27, zFront+1.80);
+  // ── Plafonnier néon ──
+  function makeNeon(cx, floorY, cz, roomId) {
+    const ceilY=floorY+5.0;
+    const box2=new THREE.Mesh(new THREE.BoxGeometry(1.40,0.09,0.45),new THREE.MeshLambertMaterial({color:0xdddacc}));
+    box2.position.set(cx,ceilY-0.05,cz); scene.add(box2);
+    const tube=new THREE.Mesh(new THREE.BoxGeometry(1.20,0.07,0.14),mNeon);
+    tube.position.set(cx,ceilY-0.11,cz); scene.add(tube);
+    const light=new THREE.PointLight(0xfff8e0,1.4,20);
+    light.position.set(cx,ceilY-0.15,cz); scene.add(light);
+    classroomLights[roomId]={light,tube,on:true};
   }
 
-  // ═══════════════════════════════════
-  // ─── CLASSE 5e A — 1er étage, droite (X=27→36, Z=-27→18, Y=5) ──
-  // 8 élèves
-  // ═══════════════════════════════════
-  {
-    const cx=31.5, cy=5, zFront=-27, zBack=18;
-    makeMuralBoard(cx, cy+2.40, zFront+0.12, 3.80, 1.40);
-    makeProfDesk(cx, cy, zFront+1.80, 0);
-    placePupitres(8, cx, cy, zFront, zBack, 27, 36, zFront+1.80);
+  // ══════════════════════════════════════════
+  // ── Construction d'une salle complète ──
+  // cx = centre X salle, floorY = Y sol, xSign = +1 (droite) ou -1 (gauche)
+  // Porte à Z=15.8, fond à Z=-27
+  // ══════════════════════════════════════════
+  function buildClassroom(roomId, cx, floorY, xSign) {
+    const zFond  = -27;   // mur fond (tableau)
+    const zPorte = 15.8;  // porte entrée
+    const xWall  = cx + xSign*4.5; // mur latéral intérieur (vers cour)
+    classroomStates[roomId]={lightOn:true};
+
+    // ── Tableau noir sur le mur fond ──
+    makeBoard(cx, floorY, zFond+0.07, 6.5, 2.2, roomId);
+
+    // ── Bureau prof entre tableau et élèves ──
+    makeProfDesk(cx, floorY, zFond+2.8);
+
+    // ── 8 pupitres : 2 colonnes × 4 rangées, face au tableau (vers Z-) ──
+    // Les élèves regardent vers zFond donc pz va de ~Z=-2 vers ~Z=11 (côté porte)
+    // Chaise à pz+0.75 (vers Z+, derrière le bureau)
+    const cols=2, rows=4, spX=2.6, spZ=3.2;
+    const startX = cx - (cols-1)*spX/2;
+    const startZ = zFond + 5.5; // commence 5.5m après le fond
+    for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){
+      makePupitre(startX+c*spX, floorY, startZ+r*spZ, roomId, r*cols+c);
+    }
+    // startZ+3*spZ = -27+5.5+9.6 = -11.9 → dernier rang à Z=-11.9, chaise à Z=-11.15
+    // Bien avant Z=15 (porte) ✓
+
+    // ── Casiers : 8 casiers sur le mur près de la porte (Z≈10 à 15.5) ──
+    // Sur le mur latéral intérieur (côté cour, à x=xWall)
+    const students = roomStudents[roomId] || [];
+    const lockerStartZ = zPorte - 1.5; // commence près de la porte
+    for(let i=0;i<8;i++){
+      const lz = lockerStartZ - i*1.10;
+      const name = students[i] || ('Élève '+(i+1));
+      const ld = makeLocker(xWall - xSign*0.25, floorY, lz, name, roomId, i);
+      // Orienter la porte vers l'intérieur de la salle (face vers le centre)
+      const baseRY = xSign > 0 ? Math.PI/2 : -Math.PI/2;
+      ld.dp.rotation.y = baseRY;
+      ld.baseRY = baseRY;
+    }
+
+    // ── Interrupteur près de la porte ──
+    makeSwitch(cx - xSign*3.8, floorY, zPorte - 0.4, roomId, xSign>0 ? -Math.PI/2 : Math.PI/2);
+
+    // ── Néon au plafond (milieu de la salle) ──
+    makeNeon(cx, floorY, (zFond+zPorte)/2, roomId);
   }
 
-  // ═══════════════════════════════════
-  // ─── CLASSE 5e B — 1er étage, gauche (X=-36→-27, Z=-27→18, Y=5) ──
-  // 8 élèves
-  // ═══════════════════════════════════
-  {
-    const cx=-31.5, cy=5, zFront=-27, zBack=18;
-    makeMuralBoard(cx, cy+2.40, zFront+0.12, 3.80, 1.40);
-    makeProfDesk(cx, cy, zFront+1.80, 0);
-    placePupitres(8, cx, cy, zFront, zBack, -36, -27, zFront+1.80);
-  }
+  buildClassroom('classeD',  31.5, 0,  -1); // RDC droite  (X=27→36, mur int X=27)
+  buildClassroom('classeC', -31.5, 0,  +1); // RDC gauche  (X=-36→-27, mur int X=-27)
+  buildClassroom('classeA',  31.5, 5,  -1); // 1er droite
+  buildClassroom('classeB', -31.5, 5,  +1); // 1er gauche
 }
+
+// ══════════════════════════════════════════════════════
+// ─── SYSTÈME D'INTERACTION SALLES ─────────────────────
+// ══════════════════════════════════════════════════════
+
+// Prompt contextuel (comme la bulle du surveillant)
+const interactHint = document.createElement('div');
+interactHint.style.cssText=`
+  position:fixed; bottom:100px; left:50%; transform:translateX(-50%);
+  background:rgba(0,0,0,0.62); color:#fff; border:1px solid rgba(255,255,255,0.28);
+  border-radius:20px; padding:6px 20px; font-size:13px; font-family:Georgia,serif;
+  letter-spacing:0.4px; pointer-events:none; z-index:50; display:none;
+`;
+document.body.appendChild(interactHint);
+
+// Mode dessin sur tableau
+let chalkMode=false, chalkTarget=null, isDrawing=false, lastMX=-1, lastMY=-1;
+
+const chalkUI=document.createElement('div');
+chalkUI.style.cssText=`
+  position:fixed;top:60px;left:50%;transform:translateX(-50%);
+  background:rgba(0,0,0,0.68);color:#fff;border-radius:12px;padding:6px 18px;
+  font-size:12px;font-family:Georgia,serif;display:none;z-index:50;
+`;
+chalkUI.innerHTML='🖍️ Mode craie — Clic-glisser pour écrire &nbsp;|&nbsp; bouton 🤚 pour quitter';
+document.body.appendChild(chalkUI);
+
+// Mode assis
+let isSeated=false, seatedPos=null;
+
+const sitUI=document.createElement('div');
+sitUI.style.cssText=`
+  position:fixed;bottom:100px;right:20px;background:rgba(0,0,0,0.62);color:#fff;
+  border-radius:20px;padding:6px 16px;font-size:13px;font-family:Georgia,serif;
+  display:none;z-index:50;cursor:pointer;border:1px solid rgba(255,255,255,0.28);
+`;
+sitUI.textContent='🧍 Se lever';
+document.body.appendChild(sitUI);
+sitUI.addEventListener('click',()=>standUp());
+
+function standUp(){ isSeated=false; sitUI.style.display='none'; }
+
+// Raycaster
+const rc3=new THREE.Raycaster();
+const sc2=new THREE.Vector2(0,0);
+
+function getNearInteractable(){
+  rc3.setFromCamera(sc2,camera);
+  // Collecte tous les meshes des interactables
+  const allMeshes=[];
+  const meshToIA=new Map();
+  interactables.forEach(ia=>{
+    const collect=(obj)=>{
+      if(obj.isMesh){allMeshes.push(obj);meshToIA.set(obj,ia);}
+      obj.children&&obj.children.forEach(collect);
+    };
+    collect(ia.mesh instanceof THREE.Group ? ia.mesh : {isMesh:false,children:[ia.mesh]});
+    if(ia.mesh.isMesh){allMeshes.push(ia.mesh);meshToIA.set(ia.mesh,ia);}
+  });
+  const hits=rc3.intersectObjects(allMeshes,false);
+  if(!hits.length||hits[0].distance>3.2) return null;
+  return meshToIA.get(hits[0].object)||null;
+}
+
+function doInteract(){
+  if(chalkMode){ exitChalk(); return; }
+  if(isSeated){ standUp(); return; }
+  const ia=getNearInteractable();
+  if(!ia) return;
+  if(ia.type==='blackboard') enterChalk(ia.data);
+  else if(ia.type==='chair')  sitDown(ia.data);
+  else if(ia.type==='locker') toggleLocker(ia.data);
+  else if(ia.type==='lightswitch') toggleLight(ia.roomId,ia.data);
+}
+
+function enterChalk(d){ chalkMode=true;chalkTarget=d;chalkUI.style.display='block';canvas.style.cursor='crosshair'; }
+function exitChalk(){ chalkMode=false;chalkTarget=null;chalkUI.style.display='none';isDrawing=false;lastMX=-1;lastMY=-1; }
+
+function sitDown(d){
+  isSeated=true;
+  seatedPos=new THREE.Vector3(d.seatX,d.seatY,d.seatZ);
+  camera.position.copy(seatedPos);
+  sitUI.style.display='block';
+}
+
+function toggleLocker(d){
+  d.isOpen=!d.isOpen;
+  // d.baseRY est la rotation initiale (orientation face intérieure), stockée à la création
+  const base=d.baseRY||0;
+  d.dp.rotation.y = d.isOpen ? base + Math.PI*0.68 : base;
+  showToastMsg(d.isOpen?'📂 Casier ouvert':'🔒 Casier fermé');
+}
+
+function toggleLight(roomId,d){
+  const st=classroomLights[roomId]; if(!st) return;
+  st.on=!st.on;
+  st.light.intensity=st.on?1.4:0;
+  st.tube.material=st.on?
+    new THREE.MeshLambertMaterial({color:0xffffee,emissive:0xffffaa,emissiveIntensity:1.0}):
+    new THREE.MeshLambertMaterial({color:0x888880,emissive:0x000000,emissiveIntensity:0});
+  showToastMsg(st.on?'💡 Lumière allumée':'🌑 Lumière éteinte');
+}
+
+function showToastMsg(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.style.opacity='1';
+  setTimeout(()=>{t.style.opacity='0';},2000);
+}
+
+// Dessin tableau
+canvas.addEventListener('mousedown',e=>{
+  if(!chalkMode) return; isDrawing=true;
+  const r=canvas.getBoundingClientRect(); lastMX=e.clientX-r.left; lastMY=e.clientY-r.top;
+});
+document.addEventListener('mouseup',()=>{isDrawing=false;lastMX=-1;lastMY=-1;});
+document.addEventListener('mousemove',e=>{
+  if(!chalkMode||!isDrawing||!chalkTarget) return;
+  const r=canvas.getBoundingClientRect();
+  const mx=e.clientX-r.left,my=e.clientY-r.top;
+  if(lastMX<0){lastMX=mx;lastMY=my;return;}
+  const ct=chalkTarget;
+  const sx=ct.canvas.width/(r.width)*3.2, sy=ct.canvas.height/(r.height)*3.2;
+  ct.ctx.strokeStyle=`rgba(235,235,215,${0.75+Math.random()*0.25})`;
+  ct.ctx.lineWidth=5+Math.random()*3; ct.ctx.lineCap='round'; ct.ctx.lineJoin='round';
+  const px=ct.canvas.width/2+(mx-r.width/2)*sx;
+  const py=ct.canvas.height/2+(my-r.height/2)*sy;
+  const px2=ct.canvas.width/2+((lastMX)-r.width/2)*sx;
+  const py2=ct.canvas.height/2+((lastMY)-r.height/2)*sy;
+  ct.ctx.beginPath(); ct.ctx.moveTo(px2,py2); ct.ctx.lineTo(px,py); ct.ctx.stroke();
+  ct.tex.needsUpdate=true;
+  lastMX=mx; lastMY=my;
+});
+
+// Bouton interagir (comme le bouton main des portes)
+const classInteractBtn=document.createElement('button');
+classInteractBtn.innerHTML='🤚';
+classInteractBtn.style.cssText=`
+  display:none;position:fixed;bottom:170px;right:20px;
+  background:rgba(255,255,255,0.25);border:2px solid rgba(255,255,255,0.45);
+  border-radius:50%;width:60px;height:60px;font-size:28px;
+  cursor:pointer;z-index:20;backdrop-filter:blur(4px);touch-action:none;
+`;
+document.body.appendChild(classInteractBtn);
+classInteractBtn.addEventListener('click',()=>doInteract());
+classInteractBtn.addEventListener('touchstart',e=>{e.preventDefault();doInteract();},{passive:false});
+
+function updateInteractHint(){
+  if(chalkMode||isSeated){interactHint.style.display='none';classInteractBtn.style.display='none';return;}
+  const ia=getNearInteractable();
+  if(!ia){interactHint.style.display='none';classInteractBtn.style.display='none';return;}
+  const lbls={blackboard:'🖊️ Écrire au tableau',chair:'🪑 S\'asseoir',locker:'📦 Ouvrir le casier',lightswitch:'💡 Lumière'};
+  interactHint.textContent=(lbls[ia.type]||'Interagir')+' 🤚';
+  interactHint.style.display='block';
+  classInteractBtn.style.display='block';
+}
+
+// ─── Fin du système d'interaction salles ───
+
 
 // ═══════════════════════════════════════════════════════
 // ─── CAGE D'ESCALIER 1er ÉTAGE (au-dessus de la cage RDC) ──────────
@@ -3901,6 +4116,18 @@ let last=0;
 function loop(ts){
   const dt=Math.min((ts-last)/1000,0.05);last=ts;
   if(inDialogue){ renderer.render(scene,camera); requestAnimationFrame(loop); return; }
+
+  // ─── Mode assis : bloquer déplacement ───
+  if(isSeated){
+    if(seatedPos) camera.position.set(seatedPos.x, seatedPos.y, seatedPos.z);
+    updateInteractHint();
+    updateCoordDisplay(); drawMinimap(); drawClock(); tickAutoSpeech(dt);
+    renderer.render(scene,camera); drawJoy('jL',jLx,jLy); drawJoy('jR',jRx,jRy);
+    requestAnimationFrame(loop); return;
+  }
+
+  updateInteractHint();
+
   const speed=6;
   let fx=0,fz=0;
   if(keys['z']||keys['arrowup'])   fz=1;
