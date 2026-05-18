@@ -2874,8 +2874,6 @@ function drawJoy(id,dx,dy){
   const mRoofTop = new THREE.MeshLambertMaterial({map:roofTex, color:0x6a7880});
   const roofY = 5.05;
 
-  // Toit couloir gauche SUPPRIMÉ — remplacé par le sol de la Classe 5e B au 1er étage
-  // Toit couloir droit SUPPRIMÉ — remplacé par le sol de la Classe 5e A au 1er étage
   // Toit bande couloir en U gauche : X=-24→-27, Z=-27→18
   { const pl = new THREE.Mesh(new THREE.PlaneGeometry(3, 45), mRoofTop);
     pl.rotation.x = -Math.PI/2; pl.position.set(-25.5, roofY, (-27+18)/2); scene.add(pl); }
@@ -2890,6 +2888,12 @@ function drawJoy(id,dx,dy){
 
   // ── PLAFONDS INTÉRIEURS RDC (sous les salles du 1er étage) ──
   const mCeilRDC = new THREE.MeshLambertMaterial({color:0xe8e0cc});
+  // Plafond couloir gauche RDC (Classe C) : X=-36→-27, Z=-27→18
+  { const pl = new THREE.Mesh(new THREE.PlaneGeometry(9, 45), mCeilRDC);
+    pl.rotation.x = Math.PI/2; pl.position.set(-(27+4.5), roofY, (-27+18)/2); scene.add(pl); }
+  // Plafond couloir droit RDC (Classe D) : X=+27→+36, Z=-27→18
+  { const pl = new THREE.Mesh(new THREE.PlaneGeometry(9, 45), mCeilRDC);
+    pl.rotation.x = Math.PI/2; pl.position.set( (27+4.5), roofY, (-27+18)/2); scene.add(pl); }
   // Plafond bande couloir en U gauche : X=-24→-27, Z=-27→18
   { const pl = new THREE.Mesh(new THREE.PlaneGeometry(3, 45), mCeilRDC);
     pl.rotation.x = Math.PI/2; pl.position.set(-25.5, roofY, (-27+18)/2); scene.add(pl); }
